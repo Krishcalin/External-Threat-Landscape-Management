@@ -23,8 +23,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import os                                                  # noqa: E402
+
 from fastapi import FastAPI, HTTPException, Query          # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware         # noqa: E402
+from fastapi.responses import FileResponse                 # noqa: E402
+from fastapi.staticfiles import StaticFiles                # noqa: E402
 
 from core import engine, intel, inventory, match, scoring  # noqa: E402
 from core.overwatch import (RECONCILIATION_MEANING, load as load_overwatch,
@@ -191,3 +195,51 @@ def reconciliation_guide() -> Dict[str, str]:
     cannot drift into describing the same state differently.
     """
     return {k.value: v for k, v in RECONCILIATION_MEANING.items()}
+
+
+# ---------------------------------------------------------------------------
+# The console.
+#
+# Mounted LAST, deliberately. A catch-all that serves index.html must not shadow
+# /api/* — if it did, a typo in an API path would return the SPA with status 200
+# and the client would try to parse HTML as JSON, which surfaces as a baffling
+# console error instead of the 404 it actually is.
+# ---------------------------------------------------------------------------
+CONSOLE_DIR = Path(os.environ.get("SKOPOS_CONSOLE_DIR", ROOT / "frontend" / "dist"))
+
+
+def mount_console(application: FastAPI, directory: Path) -> bool:
+    """Serve the built SPA, if one has been built.
+
+    Returns whether it mounted, rather than raising. Running the API without a
+    console is a legitimate configuration — the CLI and the OpenAPI docs are
+    still useful — and a missing bundle should not take the service down.
+    """
+    index = directory / "index.html"
+    if not index.is_file():
+        return False
+
+    assets = directory / "assets"
+    if assets.is_dir():
+        application.mount("/assets", StaticFiles(directory=assets), name="assets")
+
+    @application.get("/", include_in_schema=False)
+    def _root() -> FileResponse:
+        return FileResponse(index)
+
+    @application.get("/{path:path}", include_in_schema=False)
+    def _spa(path: str) -> FileResponse:
+        # Client-side routes have no file behind them, so unknown paths return
+        # the shell. API paths are excluded above by mount order; anything under
+        # /api reaching here is a genuine 404 and is reported as one.
+        if path.startswith("api/"):
+            raise HTTPException(status_code=404, detail=f"no such endpoint: /{path}")
+        candidate = directory / path
+        if candidate.is_file() and directory.resolve() in candidate.resolve().parents:
+            return FileResponse(candidate)
+        return FileResponse(index)
+
+    return True
+
+
+CONSOLE_MOUNTED = mount_console(app, CONSOLE_DIR)

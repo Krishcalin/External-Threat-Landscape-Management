@@ -1,0 +1,55 @@
+# SKOPOS local stack: db-1 and app-1.
+#
+# `name:` fixes the compose project, so the containers are `skopos-db-1` and
+# `skopos-app-1` rather than being named after whatever the checkout directory
+# happens to be called.
+
+name: skopos
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: skopos
+      POSTGRES_USER: skopos
+      # No default. An unset password here fails the stack at startup, which is
+      # the correct outcome — a compose file with a fallback password is how
+      # dev credentials reach production.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Postgres trusts any local connection by default; scram is what makes the
+      # password above actually load-bearing.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+    ports:
+      # Loopback only. Binding 0.0.0.0 would put the database on every interface
+      # of the laptop, including whatever network it joins next.
+      - "127.0.0.1:55443:5432"
+    volumes:
+      - skopos-db:/var/lib/postgresql/data
+      # Runs once, on an empty data directory. Re-running the schema on an
+      # existing volume is the migration story, not this.
+      - ./db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skopos -d skopos"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      SKOPOS_DATABASE_URL: postgresql://skopos:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/skopos
+      SKOPOS_CONSOLE_DIR: /app/frontend/dist
+    ports:
+      - "127.0.0.1:8100:8000"
+    depends_on:
+      db:
+        # Not just "started": the app opens a pool at boot, and a race against
+        # an initialising Postgres is a restart loop that looks like a bug.
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  skopos-db:

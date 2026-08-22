@@ -1,0 +1,9 @@
+# SKOPOS runtime dependencies.
+#
+# Pinned where the version is known-good on this stack, ranged where only the
+# major matters. A scan records the catalogue version that answered it
+# (core/intel.py); that reproducibility is worth little if the code doing the
+# reasoning drifts underneath it between deployments.
+fastapi==0.138.0
+uvicorn[standard]==0.49.0
+psycopg[binary]>=3.2,<4
