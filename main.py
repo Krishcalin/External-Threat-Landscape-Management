@@ -39,10 +39,19 @@ def cmd_scan(args) -> int:
     corpus = intel.load()
     assets, rejected = inventory.load(Path(args.inventory))
 
+    # Progress goes to STDERR when --json is set, so stdout carries nothing but
+    # the document. It used to go to stdout unconditionally, which meant
+    # `scan x.csv --json > out.json` produced two human-readable lines followed
+    # by a JSON object — a file no parser can read, on the one interface whose
+    # entire purpose is being parsed. Losing the context entirely would be the
+    # wrong fix: it is still printed, just on the stream meant for it.
+    progress = sys.stderr if args.json else sys.stdout
     print(f"Catalogue {corpus.catalog_version} "
-          f"({len(corpus)} exploited vulnerabilities, {_fmt_age(corpus.age_days())})")
-    print(f"Inventory {args.inventory}: {len(assets)} asset(s) read", end="")
-    print(f", {len(rejected)} row(s) unreadable" if rejected else "")
+          f"({len(corpus)} exploited vulnerabilities, {_fmt_age(corpus.age_days())})",
+          file=progress)
+    print(f"Inventory {args.inventory}: {len(assets)} asset(s) read", end="",
+          file=progress)
+    print(f", {len(rejected)} row(s) unreadable" if rejected else "", file=progress)
 
     exposures = match.match(assets, corpus.entries())
     unmatched = match.unmatched_assets(assets, exposures)
@@ -202,7 +211,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _force_utf8_output() -> None:
+    """Write UTF-8 regardless of the console's locale.
+
+    On Windows, a redirected stdout falls back to the ANSI code page, so the
+    em-dashes in this tool's own notices were being written as cp1252 byte 0x97.
+    The resulting file is not UTF-8, and anything reading it as UTF-8 — which is
+    what every consumer does, including this tool when it reads its own CSVs —
+    fails on it. Nothing here is worth making the output encoding depend on
+    which machine ran the scan.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8")
+            except (ValueError, OSError):
+                # A stream that refuses to be reconfigured is not a reason to
+                # fail the run; the output is merely as good as the console.
+                pass
+
+
 def main(argv=None) -> int:
+    _force_utf8_output()
     args = build_parser().parse_args(argv)
     try:
         return args.fn(args)
