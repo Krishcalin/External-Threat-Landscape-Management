@@ -58,6 +58,14 @@ STOPWORDS: Set[str] = {
     "services", "product", "products", "edition", "enterprise", "manager",
     "management", "solution", "solutions", "application", "applications",
     "framework", "toolkit", "client", "agent", "appliance", "gateway",
+    # Placeholders a collector writes when it could not identify anything.
+    # Without these, an unfingerprinted host does not match by COINCIDENCE —
+    # `unknown` merely happens to appear in 0 of the catalogue's 1,674 entries
+    # today. One entry containing the word would join every unidentified host in
+    # the estate at once. Listing them routes the placeholder through the
+    # empty-set short-circuit in _corresponds(), which is a structural guarantee
+    # rather than a lucky one.
+    "unknown", "unidentified", "none", "null",
 }
 
 #: A token this short is an abbreviation or a fragment, and matching on it
@@ -65,7 +73,12 @@ STOPWORDS: Set[str] = {
 MIN_TOKEN = 3
 
 _SPLIT = re.compile(r"[^a-z0-9]+")
-_CVE = re.compile(r"CVE-\d{4}-\d{4,7}", re.I)
+#: Public because core/provenance.py redacts against THIS pattern rather than a
+#: restatement of it. A private copy is how the original miss happened: this one
+#: is case-insensitive, and a redactor written case-sensitively passed its own
+#: tests while missing `cve-2021-44228` in the wild.
+CVE_PATTERN = re.compile(r"CVE-\d{4}-\d{4,7}", re.I)
+_CVE = CVE_PATTERN   # retained for existing internal references
 
 
 def tokens(text: Optional[str]) -> Set[str]:
@@ -123,10 +136,22 @@ def declared_cves(asset: Asset) -> Set[str]:
     Read from any attribute, because inventories name this column everything
     from `cve` to `known_vulns`, and an explicit statement by the customer
     outranks any name matching this module could do.
+
+    BUT ONLY THE CUSTOMER'S COLUMNS. Attributes a SKOPOS collector wrote are
+    skipped, because the promotion this function drives — STRONG confidence,
+    evidence reading "the inventory names CVE-… on this asset" — is a claim about
+    what the CUSTOMER said. A string copied out of a third party's HTTP response
+    is not that, and treating it as that lets anyone who controls a response
+    header write into the top of the worklist. See core/provenance.py, which
+    also carries the measurement that motivated this.
     """
+    from core.provenance import tool_authored   # local: provenance imports us
+
     found: Set[str] = set()
-    for value in list(asset.attributes.values()) + [asset.version]:
-        found |= {m.group(0).upper() for m in _CVE.finditer(str(value or ""))}
+    customer_stated = [v for k, v in asset.attributes.items()
+                       if not tool_authored(k)]
+    for value in customer_stated + [asset.version]:
+        found |= {m.group(0).upper() for m in CVE_PATTERN.finditer(str(value or ""))}
     return found
 
 
@@ -220,5 +245,10 @@ def unmatched_assets(assets: Iterable[Asset],
     far more likely to be a naming problem than a secure estate, and a reader who
     sees "0 exposures, 400 assets unmatched" asks the right question.
     """
-    matched = {e.asset.identifier for e in exposures}
-    return [a for a in assets if a.identifier not in matched]
+    # Keyed on (identifier, product), not identifier alone. Fingerprinting gives
+    # one host several products — a web server and an application behind it — and
+    # identifier-only keying would call the whole host "matched" as soon as any
+    # ONE of its products joined, hiding the misses on the rest. That is exactly
+    # the statistic this function exists to protect.
+    matched = {(e.asset.identifier, e.asset.product) for e in exposures}
+    return [a for a in assets if (a.identifier, a.product) not in matched]

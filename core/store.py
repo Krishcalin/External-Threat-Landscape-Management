@@ -108,7 +108,7 @@ class MemoryStore:
 class PostgresStore:
     """The deployment backend. Requires `psycopg` and a reachable database."""
 
-    def __init__(self, dsn: Optional[str] = None) -> None:
+    def __init__(self, dsn: Optional[str] = None, migrate: bool = True) -> None:
         self._dsn = dsn or os.environ.get("SKOPOS_DATABASE_URL")
         if not self._dsn:
             raise StoreUnavailable(
@@ -119,6 +119,16 @@ class PostgresStore:
             import psycopg  # noqa: F401
         except ImportError as exc:  # pragma: no cover - environment-dependent
             raise StoreUnavailable(f"psycopg is not installed: {exc}") from exc
+
+        if migrate:
+            # Refuse to serve against a schema behind the code. A missing CHECK
+            # constraint does not announce itself — it simply stops rejecting
+            # the rows it exists to reject, and the first sign is a bad finding.
+            from core import migrate as _migrate
+            try:
+                _migrate.ensure_current(self._dsn)
+            except _migrate.MigrationError as exc:
+                raise StoreUnavailable(str(exc)) from exc
 
     def _connect(self):
         import psycopg

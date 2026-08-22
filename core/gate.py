@@ -13,10 +13,19 @@ author can forget, misread, or ignore — and the failure is silent: the plugin
 works, it just probes things it should not have.
 
 So the collectors do not check anything. They cannot run at all without a
-`Permit`, and a `Permit` can only come out of `authorise()`. A plugin that wants
-to skip the gate has to fabricate one, and the constructor refuses to build a
-Permit without a token this module never hands out. That turns a convention into
-a structural property: the unsafe path is not discouraged, it is unavailable.
+`Permit`, and a `Permit` can only come out of `authorise()` — every field that
+decides what it authorises is covered by a seal the constructor verifies.
+
+The first version of this used a sentinel object and was WRONG, in a way worth
+recording because the mistake is easy to repeat. `dataclasses.replace()` copies
+a sentinel field forward, so a PASSIVE permit — obtainable for any in-scope name
+with no ownership proof whatsoever — could be mutated into an ACTIVE permit for
+an arbitrary host, and the check passed. The test that was supposed to catch it
+only covered DIRECT construction, so it went green. Frozen does not mean
+immutable when the language ships a copy-with-changes helper.
+
+The seal is honest about its limit (see `_SECRET`): it stops mutation and
+accident, not code already running in this process.
 
 THREE ANSWERS, NOT TWO
 ----------------------
@@ -37,17 +46,42 @@ argued with by adding a scope rule.
 from __future__ import annotations
 
 import enum
+import hashlib
+import hmac
+import secrets
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from core.ownership import OwnershipNotVerified, Verification
 from core.scope import Decision, Scope, ScopeKind
 
-#: Handed to Permit's constructor and nowhere else. The point is not secrecy but
-#: that constructing a Permit outside authorise() is obviously wrong to anyone
-#: reading the code, and fails immediately for anyone who tries it anyway.
-_ISSUER = object()
+#: Process-lifetime key that seals permits. A sentinel object was tried first and
+#: was NOT enough: `dataclasses.replace()` copies a sentinel field forward, so a
+#: PASSIVE permit — which needs no ownership proof at all — could be mutated into
+#: an ACTIVE one for an arbitrary host, and __post_init__ would accept it. That
+#: was measured, not theorised. A seal over the fields fixes it because mutating
+#: any of them invalidates the seal.
+#:
+#: HONEST LIMIT: this defeats mutation, not a co-resident attacker. Anything
+#: running in this process can read _SECRET and mint permits. The guarantee is
+#: "a collector cannot casually or accidentally escalate", which is the threat
+#: FR-GOV-001 is actually about; it is not a cryptographic boundary against code
+#: already inside the process.
+_SECRET = secrets.token_bytes(32)
+
+
+def _seal(asset: str, operation: str, exposure: "Exposure", actor: str) -> str:
+    """Bind a permit to exactly the fields that decide what it authorises.
+
+    Length-prefixed for the same reason core/audit.py is: without it, an asset
+    named `a` with operation `bc` and one named `ab` with operation `c` seal
+    identically, and a permit is precisely where somebody would try that.
+    """
+    parts = (str(asset), str(operation), str(getattr(exposure, "value", exposure)),
+             str(actor))
+    material = "|".join(f"{len(x)}:{x}" for x in parts)
+    return hmac.new(_SECRET, material.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 class Exposure(str, enum.Enum):
@@ -105,13 +139,16 @@ class Permit:
     actor: str
     #: Why it was granted, in words, so an audit payload is not a bare "allowed".
     rationale: str = ""
-    _token: object = field(default=None, repr=False, compare=False)
+    _token: str = field(default="", repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if self._token is not _ISSUER:
+        expected = _seal(self.asset, self.operation, self.exposure, self.actor)
+        if not hmac.compare_digest(str(self._token or ""), expected):
             raise PermissionError(
                 "a Permit may only be issued by core.gate.authorise(); "
-                "constructing one directly bypasses FR-GOV-001")
+                "constructing or MUTATING one bypasses FR-GOV-001. "
+                "dataclasses.replace() on a Permit is not a way to change what "
+                "it authorises — ask the gate again.")
 
 
 def classify(operation: str) -> Exposure:
@@ -163,7 +200,7 @@ def authorise(asset: str,
         return Permit(asset=asset, operation=operation, exposure=exposure,
                       actor=actor,
                       rationale=f"passive collection; {verdict.explain()}",
-                      _token=_ISSUER)
+                      _token=_seal(asset, operation, exposure, actor))
 
     # ACTIVE from here down: ownership must be proven, for this asset, and current.
     if verification is None:
@@ -188,7 +225,7 @@ def authorise(asset: str,
     return Permit(asset=asset, operation=operation, exposure=exposure,
                   actor=actor,
                   rationale=f"active collection; {verification.explain(today)}",
-                  _token=_ISSUER)
+                  _token=_seal(asset, operation, exposure, actor))
 
 
 def is_permitted(asset: str, operation: str, actor: str, scope: Scope,
@@ -208,12 +245,43 @@ def is_permitted(asset: str, operation: str, actor: str, scope: Scope,
         return False
 
 
+def plan(assets: Sequence[str], operation: str, actor: str, scope: Scope,
+         verifications: Mapping[str, Optional[Verification]],
+         kind: Optional[ScopeKind] = None,
+         today: Optional[date] = None) -> Tuple[List[str], List[str]]:
+    """What a run WOULD touch, and what it would refuse — using real records.
+
+    This is what a --dry-run must call. `refusal_reasons()` cannot answer the
+    question: it passes verification=None, so for any ACTIVE operation it reports
+    every asset as unverified by construction. An operator previewing a port
+    sweep would be told nothing will be touched, then watch the real run touch
+    things — which is worse than having no preview, because it is a preview that
+    is confidently wrong.
+
+    Returns `(would_run, refusals)`. Both are returned because a preview that
+    shows only one of them is half an answer.
+    """
+    would_run: List[str] = []
+    refusals: List[str] = []
+    for asset in assets:
+        try:
+            authorise(asset, operation, actor, scope,
+                      verifications.get(asset), kind, today)
+            would_run.append(asset)
+        except (OperationRefused, NotInScope, OwnershipNotVerified) as exc:
+            refusals.append(f"{asset}: {exc}")
+    return would_run, refusals
+
+
 def refusal_reasons(assets: Sequence[str], operation: str, actor: str,
                     scope: Scope, today: Optional[date] = None) -> List[str]:
-    """Explain, for a batch, why each asset would be refused.
+    """Why each asset would be refused WITH NO VERIFICATIONS AT ALL.
 
-    Exists so an operator planning a run sees every problem at once, rather than
-    fixing one asset, re-running, and hitting the next.
+    Note the qualifier — it is not the question an operator previewing a run is
+    asking, because every ACTIVE operation comes back refused regardless of what
+    is on record. Use `plan()` for that. This remains for the case it does answer:
+    which assets are refused for a reason ownership cannot fix (out of scope,
+    excluded, prohibited operation).
     """
     reasons: List[str] = []
     for asset in assets:

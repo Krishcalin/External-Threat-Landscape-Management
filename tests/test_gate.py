@@ -4,6 +4,7 @@ Plus FR-GOV-003 and FR-GOV-007, which are refusals no authorisation can lift.
 """
 from __future__ import annotations
 
+import dataclasses
 from datetime import date, timedelta
 
 import pytest
@@ -150,3 +151,79 @@ def test_refusal_reasons_reports_every_asset_not_just_the_first():
         ["api.example.com", "someone-else.net", "vpn.example.com"],
         "port_scan", ACTOR, scope_with("example.com"), today=TODAY)
     assert len(reasons) == 3, "an operator should see the whole list at once"
+
+
+# -- the bypass the original test missed -------------------------------------
+@pytest.mark.parametrize("field,value", [
+    ("asset", "victim.net"),
+    ("operation", "port_scan"),
+    ("exposure", Exposure.ACTIVE),
+    ("actor", "somebody-else"),
+])
+def test_a_permit_cannot_be_forged_by_mutation(field, value):
+    """The real bypass, which direct-construction tests do not reach.
+
+    `dataclasses.replace()` copies private fields forward, so the original
+    sentinel-token design accepted a mutated permit: a PASSIVE permit — which any
+    caller can obtain for any in-scope name with no ownership proof at all —
+    became an ACTIVE permit for an arbitrary host. Frozen does not mean immutable
+    when the language ships a copy-with-changes helper.
+    """
+    passive = authorise("api.example.com", "ct_log_search", ACTOR,
+                        scope_with("example.com"), today=TODAY)
+    assert passive.exposure is Exposure.PASSIVE
+
+    with pytest.raises(PermissionError):
+        dataclasses.replace(passive, **{field: value})
+
+
+def test_the_escalation_that_mutation_enabled_is_closed():
+    """Stated as the attack rather than the mechanism, so it survives redesign."""
+    passive = authorise("api.example.com", "ct_log_search", "attacker",
+                        scope_with("example.com"), today=TODAY)
+    with pytest.raises(PermissionError):
+        dataclasses.replace(passive, asset="victim.net",
+                            operation="port_scan", exposure=Exposure.ACTIVE)
+
+
+def test_rationale_may_be_amended_because_it_authorises_nothing():
+    """The seal covers what a permit permits, not the prose describing it."""
+    permit = authorise("api.example.com", "ct_log_search", ACTOR,
+                       scope_with("example.com"), today=TODAY)
+    amended = dataclasses.replace(permit, rationale="annotated by the runner")
+    assert amended.asset == permit.asset
+
+
+# -- plan() vs refusal_reasons() ---------------------------------------------
+def test_plan_uses_the_verifications_actually_on_record():
+    """refusal_reasons() cannot answer this: it hardcodes verification=None.
+
+    An operator previewing a port sweep would be told nothing would be touched,
+    and then watch the real run touch things — a preview that is confidently
+    wrong is worse than no preview.
+    """
+    scope = scope_with("example.com")
+    records = {"api.example.com": proven("api.example.com"),
+               "old.example.com": proven("old.example.com",
+                                         on=TODAY - timedelta(days=400))}
+    would_run, refusals = gate.plan(
+        ["api.example.com", "old.example.com", "elsewhere.net"],
+        "port_scan", ACTOR, scope, records, today=TODAY)
+
+    assert would_run == ["api.example.com"]
+    assert len(refusals) == 2
+    assert any("EXPIRED" in r for r in refusals)
+    assert any("no scope rule" in r for r in refusals)
+
+
+def test_refusal_reasons_would_have_under_reported_the_same_run():
+    """Pins the difference, so nobody 'simplifies' plan() back into it."""
+    scope = scope_with("example.com")
+    stale = gate.refusal_reasons(["api.example.com"], "port_scan", ACTOR,
+                                 scope, today=TODAY)
+    assert len(stale) == 1, "reports a verified asset as refused"
+
+    would_run, _ = gate.plan(["api.example.com"], "port_scan", ACTOR, scope,
+                             {"api.example.com": proven("api.example.com")},
+                             today=TODAY)
+    assert would_run == ["api.example.com"]

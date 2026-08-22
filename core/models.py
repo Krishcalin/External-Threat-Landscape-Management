@@ -94,7 +94,10 @@ class Asset:
         if not str(self.identifier).strip():
             raise ValueError("an asset with no identifier cannot be reported "
                              "against, tracked, or assigned to anybody")
-        if not str(self.product).strip():
+        # `is None` explicitly: str(None) is "None", a four-character truthy
+        # string that sails through the strip() check and then tokenises to
+        # {"none"} — a placeholder the matcher would try to join on.
+        if self.product is None or not str(self.product).strip():
             raise ValueError("an asset with no product cannot be joined to a "
                              "vulnerability catalogue")
 

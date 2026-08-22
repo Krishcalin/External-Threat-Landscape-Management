@@ -174,3 +174,94 @@ def test_asset_lookup_is_case_insensitive(store):
     store.record_verification(
         Verification.granted("Case.Example.COM", Method.DNS_TXT, on=today))
     assert store.live_verification("case.example.com", today) is not None
+
+
+# -- migrations --------------------------------------------------------------
+def test_every_migration_is_recorded(store):
+    from core import migrate
+    assert migrate.pending(store._dsn) == []
+    assert "001" in migrate.applied(store._dsn)
+
+
+def test_ensure_current_is_idempotent(store):
+    from core import migrate
+    assert migrate.ensure_current(store._dsn) == [], "a second run applies nothing"
+
+
+def test_an_existing_volume_is_adopted_rather_than_rebuilt():
+    """The skopos-db-1 case: 001 ran via Postgres's initdb hook, before there
+    was a version table. Re-running it would fail on CREATE TABLE, so it is
+    detected and recorded instead."""
+    from core import migrate
+    name = f"skopos_adopt_{uuid.uuid4().hex[:12]}"
+    with psycopg.connect(ADMIN_DSN, autocommit=True) as admin:
+        admin.execute(f'CREATE DATABASE "{name}"')
+    dsn = ADMIN_DSN.rsplit("/", 1)[0] + f"/{name}"
+    try:
+        # Simulate the initdb path: schema present, no schema_migration table.
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute(SCHEMA.read_text(encoding="utf-8"))
+            assert conn.execute(
+                "SELECT to_regclass('public.schema_migration')").fetchone()[0] is None
+
+        applied = migrate.ensure_current(dsn)
+        assert applied == [], "001 must be back-filled, not re-executed"
+        assert migrate.applied(dsn) == ["001"]
+    finally:
+        with psycopg.connect(ADMIN_DSN, autocommit=True) as admin:
+            admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+def test_require_current_refuses_when_behind(tmp_path):
+    """Refusing beats serving: a missing CHECK constraint does not announce
+    itself, it just stops rejecting the rows it exists to reject."""
+    from core import migrate
+    name = f"skopos_behind_{uuid.uuid4().hex[:12]}"
+    with psycopg.connect(ADMIN_DSN, autocommit=True) as admin:
+        admin.execute(f'CREATE DATABASE "{name}"')
+    dsn = ADMIN_DSN.rsplit("/", 1)[0] + f"/{name}"
+    fake = tmp_path / "db"
+    fake.mkdir()
+    (fake / "001_schema.sql").write_text(SCHEMA.read_text(encoding="utf-8"),
+                                         encoding="utf-8")
+    (fake / "002_later.sql").write_text(
+        "CREATE TABLE later_thing (id INT PRIMARY KEY);", encoding="utf-8")
+    try:
+        migrate.ensure_current(dsn, directory=fake)
+        assert migrate.pending(dsn, directory=fake) == []
+
+        # A third migration appears with the code; the database is now behind.
+        (fake / "003_newer.sql").write_text(
+            "CREATE TABLE newer_thing (id INT PRIMARY KEY);", encoding="utf-8")
+        with pytest.raises(migrate.SchemaBehind) as exc:
+            migrate.require_current(dsn, directory=fake)
+        assert "003" in str(exc.value)
+    finally:
+        with psycopg.connect(ADMIN_DSN, autocommit=True) as admin:
+            admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+def test_a_failing_migration_leaves_the_schema_unchanged(tmp_path):
+    """One transaction per file: half-applied is the state nobody can reason about."""
+    from core import migrate
+    name = f"skopos_fail_{uuid.uuid4().hex[:12]}"
+    with psycopg.connect(ADMIN_DSN, autocommit=True) as admin:
+        admin.execute(f'CREATE DATABASE "{name}"')
+    dsn = ADMIN_DSN.rsplit("/", 1)[0] + f"/{name}"
+    fake = tmp_path / "db"
+    fake.mkdir()
+    (fake / "001_broken.sql").write_text(
+        "CREATE TABLE good_thing (id INT PRIMARY KEY);\n"
+        "CREATE TABLE bad_thing (id INT PRIMARY KEY, x NOTATYPE);",
+        encoding="utf-8")
+    try:
+        with pytest.raises(migrate.MigrationError):
+            migrate.ensure_current(dsn, directory=fake)
+        with psycopg.connect(dsn) as conn:
+            assert conn.execute(
+                "SELECT to_regclass('public.good_thing')").fetchone()[0] is None, \
+                "the statement before the failure must have rolled back too"
+        assert migrate.applied(dsn) == []
+    finally:
+        with psycopg.connect(ADMIN_DSN, autocommit=True) as admin:
+            admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
