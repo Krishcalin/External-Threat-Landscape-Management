@@ -35,26 +35,20 @@ hammers them is the reason they end up behind a paywall.
 from __future__ import annotations
 
 import json
-import ssl
 import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
+from collect import egress
+from collect.report import Coverage, Outcome, SourceReport
+
 USER_AGENT = "skopos-discovery/0.1 (+open-source ETLM; passive CT lookup)"
-TIMEOUT = 30
 
-
-@dataclass
-class SourceReport:
-    """What one source actually did. Carried into the result, never swallowed."""
-
-    name: str
-    ok: bool
-    names_found: int = 0
-    detail: str = ""
+#: The operation this module performs, as registered in core.gate.OPERATIONS.
+#: Named once so the permit check and the audit record cannot disagree.
+OPERATION = "ct_log_search"
 
 
 @dataclass
@@ -71,35 +65,81 @@ class DiscoveredName:
     is_wildcard: bool = False
 
 
+class DiscoveryUnavailable(RuntimeError):
+    """No source answered at all.
+
+    Raised rather than returned, mirroring `intel.IntelUnavailable`. A run in
+    which every source was down produces the same empty output as an estate with
+    nothing in it, and on the one command whose characteristic failure mode is
+    "the estate looks smaller than it is", a clean-looking zero with a success
+    exit code is the worst available answer.
+
+    Degradation is NOT this. If even one source answered, that is reported and
+    the run succeeds.
+    """
+
+
 @dataclass
 class DiscoveryResult:
     names: List[DiscoveredName]
     sources: List[SourceReport]
 
     @property
+    def coverage(self) -> Coverage:
+        return Coverage(list(self.sources))
+
+    @property
     def degraded(self) -> bool:
-        """True when any source failed, so the caller can say so rather than
-        presenting a partial estate as a complete one."""
-        return any(not s.ok for s in self.sources)
+        """Something broke. Re-running may produce more."""
+        return self.coverage.degraded
+
+    @property
+    def narrowed(self) -> bool:
+        """Nothing broke; coverage is smaller by choice (terms, missing key)."""
+        return self.coverage.narrowed
+
+    @property
+    def refused(self) -> bool:
+        """The gate said no. A governance event, not an outage."""
+        return self.coverage.refused
+
+    @property
+    def blackout(self) -> bool:
+        return self.coverage.blackout
 
     def coverage_note(self) -> str:
-        failed = [s for s in self.sources if not s.ok]
-        if not failed:
-            return (f"{len(self.names)} name(s) from "
-                    f"{len(self.sources)} certificate-transparency source(s).")
-        return (f"{len(self.names)} name(s), but "
-                f"{len(failed)} of {len(self.sources)} source(s) failed "
-                f"({'; '.join(f'{s.name}: {s.detail}' for s in failed)}). "
-                f"This estate may be larger than shown — a thin result from a "
-                f"degraded lookup looks exactly like a small estate.")
+        return self.coverage.note(len(self.names), "name")
 
 
-def _get(url: str) -> Any:
-    request = urllib.request.Request(url, headers={
-        "User-Agent": USER_AGENT, "Accept": "application/json"})
-    context = ssl.create_default_context()
-    with urllib.request.urlopen(request, timeout=TIMEOUT, context=context) as response:
-        return json.loads(response.read().decode("utf-8"))
+def _get(permit, url: str, budget=None, limiter=None) -> Any:
+    """Fetch through the one module allowed to touch the network.
+
+    This used to call urllib.request directly. It no longer does, so the permit
+    check, the HTTPS requirement, the rate buckets and the body cap all apply
+    without this module remembering any of them — see collect/egress.py.
+    """
+    response = egress.http_get(
+        permit, OPERATION, url, budget=budget, limiter=limiter,
+        headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+    if response.status != 200:
+        raise ValueError(f"HTTP {response.status}")
+    if response.truncated:
+        # Parsing a truncated body would drop names with nothing reported.
+        raise ValueError("response exceeded the body cap and was truncated")
+    return json.loads(response.text)
+
+
+def _why(exc: Exception) -> str:
+    """A detail line an operator can act on.
+
+    `type(exc).__name__` alone says "ValueError", which tells a reader nothing
+    about whether the source is down, rate-limiting, or returning something
+    unexpected. Our own failures carry the status in the message; a network
+    error from the stack below does not, so the class name is the fallback
+    rather than the default.
+    """
+    message = str(exc).strip()
+    return (message or type(exc).__name__)[:80]
 
 
 def _parse_day(value: Any) -> Optional[date]:
@@ -131,55 +171,80 @@ def _clean(name: str, apex: str) -> Optional[str]:
     return value
 
 
-def from_certspotter(apex: str) -> Tuple[List[Tuple[str, Optional[date]]], SourceReport]:
+def from_certspotter(apex: str, permit=None, budget=None, limiter=None):
     """SSLMate's CertSpotter. Answered normally when crt.sh did not."""
     url = ("https://api.certspotter.com/v1/issuances"
            f"?domain={urllib.parse.quote(apex)}"
            "&include_subdomains=true&expand=dns_names")
     try:
-        payload = _get(url)
+        payload = _get(permit, url, budget, limiter)
+    except egress.PermitMismatch:
+        # A permit problem is a BUG, not a coverage gap. Filing it as a source
+        # status line would hand the operator entirely the wrong remedy.
+        raise
     except Exception as exc:                     # noqa: BLE001 — any failure degrades
-        return [], SourceReport("certspotter", False, 0, type(exc).__name__)
+        return [], SourceReport("certspotter", Outcome.FAILED, 0, 0,
+                                _why(exc))
     if not isinstance(payload, list):
         # The API returns an object carrying a message when it refuses.
         message = (payload or {}).get("message", "unexpected response shape")
-        return [], SourceReport("certspotter", False, 0, str(message)[:80])
+        return [], SourceReport("certspotter", Outcome.FAILED, 0, 0,
+                                str(message)[:80])
     out: List[Tuple[str, Optional[date]]] = []
+    returned = 0
     for record in payload:
         seen = _parse_day(record.get("not_before"))
         for raw in record.get("dns_names") or []:
+            returned += 1
             name = _clean(raw, apex)
             if name:
                 out.append((name, seen))
-    return out, SourceReport("certspotter", True, len({n for n, _ in out}))
+    # contributed vs returned: a shared-CDN certificate carrying 500 SANs of
+    # which 3 are in-apex is not a source that gave us 3 things badly — it is a
+    # source that gave us 500, 497 of them somebody else's.
+    return out, SourceReport("certspotter", Outcome.OK,
+                             len({n for n, _ in out}), returned)
 
 
-def from_crtsh(apex: str) -> Tuple[List[Tuple[str, Optional[date]]], SourceReport]:
+def from_crtsh(apex: str, permit=None, budget=None, limiter=None):
     """crt.sh. Frequently unavailable — kept because when it answers it is the
     broadest source, and its absence is reported rather than hidden."""
     url = f"https://crt.sh/?q={urllib.parse.quote('%.' + apex)}&output=json"
     try:
-        payload = _get(url)
+        payload = _get(permit, url, budget, limiter)
+    except egress.PermitMismatch:
+        raise
     except Exception as exc:                     # noqa: BLE001
-        return [], SourceReport("crt.sh", False, 0, type(exc).__name__)
+        return [], SourceReport("crt.sh", Outcome.FAILED, 0, 0, _why(exc))
     if not isinstance(payload, list):
-        return [], SourceReport("crt.sh", False, 0, "unexpected response shape")
+        return [], SourceReport("crt.sh", Outcome.FAILED, 0, 0,
+                                "unexpected response shape")
     out: List[Tuple[str, Optional[date]]] = []
+    returned = 0
     for record in payload:
         seen = _parse_day(record.get("not_before"))
         for raw in str(record.get("name_value") or "").split("\n"):
+            returned += 1
             name = _clean(raw, apex)
             if name:
                 out.append((name, seen))
-    return out, SourceReport("crt.sh", True, len({n for n, _ in out}))
+    return out, SourceReport("crt.sh", Outcome.OK,
+                             len({n for n, _ in out}), returned)
 
 
 #: Order matters only for reporting. Every source is queried regardless.
 SOURCES = (from_certspotter, from_crtsh)
 
 
-def discover(apex: str, sources: Optional[Iterable] = None) -> DiscoveryResult:
-    """Names certificate transparency knows about, from every source that answers."""
+def discover(apex: str, permit=None, sources: Optional[Iterable] = None,
+             budget=None, limiter=None) -> DiscoveryResult:
+    """Names certificate transparency knows about, from every source that answers.
+
+    `permit` comes from `core.gate.authorise(apex, "ct_log_search", ...)`. It is
+    keyword-optional only so the existing tests can inject fake sources that
+    never reach `egress`; a real source will raise `PermitMismatch` without one,
+    which is the correct failure and is asserted in tests/test_ct_discovery.py.
+    """
     apex = str(apex).strip().lower().rstrip(".")
     if not apex:
         raise ValueError("an apex domain is required")
@@ -187,7 +252,11 @@ def discover(apex: str, sources: Optional[Iterable] = None) -> DiscoveryResult:
     merged: Dict[str, DiscoveredName] = {}
     reports: List[SourceReport] = []
     for source in (sources if sources is not None else SOURCES):
-        rows, report = source(apex)
+        try:
+            rows, report = source(apex, permit, budget, limiter)
+        except TypeError:
+            # A test double with the older single-argument signature.
+            rows, report = source(apex)
         reports.append(report)
         for name, seen in rows:
             existing = merged.get(name)

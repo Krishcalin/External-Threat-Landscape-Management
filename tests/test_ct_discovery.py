@@ -26,12 +26,22 @@ if str(ROOT) not in sys.path:
 
 from collect.ct import (DiscoveryResult, SourceReport, discover,   # noqa: E402
                         to_inventory_rows)
+from collect.report import Outcome                                 # noqa: E402
 
 
-def source(name, rows, ok=True, detail=""):
-    """A stand-in collector returning fixed rows."""
-    def _source(_apex):
-        return rows, SourceReport(name, ok, len({n for n, _ in rows}), detail)
+def source(name, rows, ok=True, detail="", outcome=None):
+    """A stand-in collector returning fixed rows.
+
+    Takes the permit/budget/limiter arguments the real sources now take, and
+    ignores them — a double that cannot be called the way production calls its
+    subject stops testing the thing it claims to.
+    """
+    resolved = outcome if outcome is not None else (
+        Outcome.OK if ok else Outcome.FAILED)
+
+    def _source(_apex, _permit=None, _budget=None, _limiter=None):
+        unique = len({n for n, _ in rows})
+        return rows, SourceReport(name, resolved, unique, len(rows), detail)
     return _source
 
 

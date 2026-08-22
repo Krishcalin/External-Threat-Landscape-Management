@@ -12,8 +12,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from core import intel, inventory, match          # noqa: E402
+from core import gate, intel, inventory, match   # noqa: E402
 from core.models import Confidence                # noqa: E402
+from core.ownership import Method, Verification   # noqa: E402
+from core.scope import ScopeKind, ScopeRule       # noqa: E402
+from core.store import StoreUnavailable, open_store  # noqa: E402
+from collect import ct as ct_module                # noqa: E402
+
+#: Said wherever an actor is taken. The audit chain attributes a CLAIM, not an
+#: identity — there is no authentication behind this string, and a reader who
+#: believes otherwise will over-trust the chain.
+ACTOR_NOTE = ("the actor string is asserted, not authenticated; the audit chain "
+              "records who claimed to do this")
 
 #: Said on every run, not in a footnote. Every exposure this phase produces is a
 #: worklist entry, because the catalogue carries no affected-version data — see
@@ -158,19 +168,54 @@ def cmd_discover(args) -> int:
     import csv
     from collect import ct
 
-    result = ct.discover(args.domain)
+    store = _store()
+    scope = store.load_scope()
+
+    # The gate decides, before anything is contacted. An apex nobody put in
+    # scope is refused here and propagates to exit 3 — not filed as a per-source
+    # coverage line, which would tell the operator a source was down when in
+    # fact they never declared the domain.
+    permit = gate.authorise(args.domain, ct.OPERATION, args.actor, scope)
+    store.append_audit(args.actor, "discovery.authorised",
+                       {"apex": args.domain, "operation": ct.OPERATION,
+                        "rationale": permit.rationale})
+
+    if args.dry_run:
+        print(f"Would run {ct.OPERATION} against {args.domain}")
+        print(f"  {permit.rationale}")
+        print(f"  sources: {', '.join(f.__name__ for f in ct.SOURCES)}")
+        print("\nNothing was contacted.")
+        return 0
+
+    result = ct.discover(args.domain, permit)
     rows = ct.to_inventory_rows(result)
 
     print(f"Certificate transparency for {args.domain}")
     for report in result.sources:
-        state = "ok" if report.ok else "FAILED"
-        print(f"  {report.name:14} {state:7} {report.names_found:4} name(s)"
-              f"{'  ' + report.detail if report.detail else ''}")
+        print("  " + report.line())
     print()
     print(result.coverage_note())
 
+    store.append_audit(args.actor, "discovery.completed",
+                       {"apex": args.domain,
+                        "names": len(result.names),
+                        "sources": [{"name": r.name, "outcome": r.outcome.value,
+                                     "contributed": r.contributed,
+                                     "returned": r.returned, "detail": r.detail}
+                                    for r in result.sources]})
+
+    if result.blackout:
+        # Raised, not returned as a clean zero. On the one command whose
+        # characteristic failure is "the estate looks smaller than it is", an
+        # empty result with a success exit code is the worst available answer.
+        # The audit record above is written FIRST, because the run where every
+        # source failed is exactly the run where "who did we contact, and what
+        # did they say" is the whole question.
+        raise ct.DiscoveryUnavailable(result.coverage_note())
+
     if not rows:
-        print('\nNothing to write.')
+        print("\nNo names in scope were found, and every source answered. "
+              "That is a real result, not an outage.")
         return 0
 
     with open(args.out, "w", encoding="utf-8", newline="") as handle:
@@ -183,6 +228,114 @@ def cmd_discover(args) -> int:
     print(f"\nWrote {len(rows)} host(s) to {args.out}{excluded}")
     print("Product is left `unknown` — CT finds names, not technologies, so the "
           "vulnerability join will not match until fingerprinting fills it in.")
+    return 0
+
+
+def _store():
+    """The store, or a refusal an operator can act on.
+
+    Deliberately no file-based fallback and no --assume-verified. Running
+    without a store means running without the scope and ownership records the
+    gate consults, and a YAML the operator wrote thirty seconds earlier makes
+    FR-GOV-001 a formality rather than a control.
+    """
+    try:
+        return open_store()
+    except StoreUnavailable as exc:
+        raise StoreUnavailable(
+            f"{exc}\n\nScope, ownership and the audit log live in the database. "
+            f"Bring it up with `docker compose up -d` and export "
+            f"SKOPOS_DATABASE_URL, or run `scan`/`intel`, which stay offline.")
+
+
+def cmd_scope_add(args) -> int:
+    """Put a rule in scope. Without this command nothing else can run.
+
+    On a fresh install there is no way to create a scope rule — the schema seeds
+    none, no API route makes one, and every gate check therefore refuses. An
+    operator would have had to hand-write an INSERT.
+    """
+    store = _store()
+    rule = ScopeRule(kind=ScopeKind(args.kind), value=args.value,
+                     is_exclude=args.exclude, note=args.note or "")
+    store.add_scope_rule(rule, actor=args.actor)
+    store.append_audit(args.actor, "scope.rule.added",
+                       {"kind": rule.kind.value, "value": rule.canonical,
+                        "is_exclude": rule.is_exclude, "note": rule.note})
+    verb = "EXCLUDED" if rule.is_exclude else "included"
+    print(f"{verb}: {rule.kind.value} {rule.canonical}"
+          + (f"  ({rule.note})" if rule.note else ""))
+    if rule.is_exclude:
+        print("An exclusion wins over every include, whatever its specificity "
+              "or the order rules were added in.")
+    return 0
+
+
+def cmd_scope_list(args) -> int:
+    store = _store()
+    rules = list(store.load_scope().rules)
+    if not rules:
+        print("Scope is empty. Nothing can be collected until something is in "
+              "it — every gate check refuses an unscoped asset.")
+        print("\n  etlm scope add example.com --kind wildcard --actor you@example.com")
+        return 0
+    includes = [r for r in rules if not r.is_exclude]
+    excludes = [r for r in rules if r.is_exclude]
+    print(f"{len(includes)} include(s), {len(excludes)} exclusion(s)\n")
+    for rule in includes + excludes:
+        marker = "EXCLUDE" if rule.is_exclude else "include"
+        print(f"  {marker:8} {rule.kind.value:14} {rule.canonical}"
+              + (f"   {rule.note}" if rule.note else ""))
+    return 0
+
+
+def cmd_verify(args) -> int:
+    """Record proof of ownership. Required before any active collection."""
+    store = _store()
+    method = Method(args.method)
+    if method is Method.MANUAL and not (args.approved_by or "").strip():
+        print("error: a manual attestation must record who approved it "
+              "(--approved-by). An unattributed assertion of ownership is not "
+              "evidence.", file=sys.stderr)
+        return 1
+
+    verification = Verification.granted(args.asset, method,
+                                        approved_by=args.approved_by,
+                                        evidence=args.evidence or "")
+    store.record_verification(verification)
+    store.append_audit(args.actor, "ownership.verified",
+                       {"asset": verification.asset,
+                        "method": method.value,
+                        "expires_at": str(verification.expires_at),
+                        "approved_by": args.approved_by})
+    print(verification.explain())
+    print(f"\nRecorded. {ACTOR_NOTE}.")
+    print("Verification expires because domains change hands and subdomains get "
+          "delegated; it proves control when it was checked, not today.")
+    return 0
+
+
+def cmd_scope_check(args) -> int:
+    """Why would this asset be allowed or refused? The preview that tells the
+    truth — see gate.plan()."""
+    store = _store()
+    scope = store.load_scope()
+    verdict = scope.resolve(args.asset)
+    print(f"{args.asset}: {verdict.decision.value.upper()}")
+    print(f"  {verdict.explain()}")
+
+    verification = store.live_verification(args.asset)
+    print(f"  ownership: "
+          + (verification.explain() if verification else "never verified"))
+    print()
+    for operation in sorted(gate.OPERATIONS):
+        exposure = gate.OPERATIONS[operation]
+        if exposure is gate.Exposure.PROHIBITED:
+            continue
+        would, refused = gate.plan([args.asset], operation, args.actor, scope,
+                                   {args.asset: verification})
+        state = "would run" if would else "REFUSED"
+        print(f"  {operation:28} {exposure.value:8} {state}")
     return 0
 
 
@@ -207,7 +360,51 @@ def build_parser() -> argparse.ArgumentParser:
     disc.add_argument("domain", help="apex domain, e.g. example.com")
     disc.add_argument("-o", "--out", default="discovered.csv",
                       help="inventory CSV to write (default discovered.csv)")
+    disc.add_argument("--actor", required=True,
+                      help=f"who is running this ({ACTOR_NOTE})")
+    disc.add_argument("--dry-run", action="store_true",
+                      help="resolve scope and report what would be contacted, "
+                           "without contacting anything")
     disc.set_defaults(fn=cmd_discover)
+
+    # -- scope -------------------------------------------------------------
+    scope_cmd = sub.add_parser(
+        "scope", help="what this product may look at (nothing runs until set)")
+    scope_sub = scope_cmd.add_subparsers(dest="scope_command", required=True)
+
+    add = scope_sub.add_parser("add", help="add an include or an exclusion")
+    add.add_argument("value", help="e.g. example.com, 203.0.113.0/24, AS64500")
+    add.add_argument("--kind", required=True,
+                     choices=[k.value for k in ScopeKind])
+    add.add_argument("--exclude", action="store_true",
+                     help="never touch this — beats every include, whatever "
+                          "its specificity or order")
+    add.add_argument("--note", default="", help="why, for whoever reads it later")
+    add.add_argument("--actor", required=True,
+                     help=f"who is adding it ({ACTOR_NOTE})")
+    add.set_defaults(fn=cmd_scope_add)
+
+    listing = scope_sub.add_parser("list", help="every rule currently in scope")
+    listing.set_defaults(fn=cmd_scope_list)
+
+    check = scope_sub.add_parser(
+        "check", help="what would be permitted against one asset, and why")
+    check.add_argument("asset")
+    check.add_argument("--actor", required=True, help=f"({ACTOR_NOTE})")
+    check.set_defaults(fn=cmd_scope_check)
+
+    # -- ownership ---------------------------------------------------------
+    verify = sub.add_parser(
+        "verify", help="record proof of ownership (required for active work)")
+    verify.add_argument("asset")
+    verify.add_argument("--method", required=True,
+                        choices=[m.value for m in Method])
+    verify.add_argument("--approved-by", default=None,
+                        help="required for --method manual")
+    verify.add_argument("--evidence", default="",
+                        help="the TXT record, the file URL, or the ticket")
+    verify.add_argument("--actor", required=True, help=f"({ACTOR_NOTE})")
+    verify.set_defaults(fn=cmd_verify)
     return parser
 
 
@@ -237,7 +434,22 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.fn(args)
+    except PermissionError as exc:
+        # Every gate refusal — OperationRefused, NotInScope, OwnershipNotVerified
+        # and PermitMismatch — lands here with its own sentence, and exits 3
+        # rather than 2. A governance refusal is NOT a coverage gap: filing it as
+        # one hands the operator the wrong remedy, and an unregistered operation
+        # would arrive as a footnote next to "you didn't set an API key" instead
+        # of failing loudly on its first run.
+        print(f"refused: {exc}", file=sys.stderr)
+        return 3
+    except StoreUnavailable as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     except intel.IntelUnavailable as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except ct_module.DiscoveryUnavailable as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except FileNotFoundError as exc:

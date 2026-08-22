@@ -71,7 +71,8 @@ from core.scope import Decision, Scope, ScopeKind
 _SECRET = secrets.token_bytes(32)
 
 
-def _seal(asset: str, operation: str, exposure: "Exposure", actor: str) -> str:
+def _seal(asset: str, operation: str, exposure: "Exposure", actor: str,
+          addresses: Sequence[str] = ()) -> str:
     """Bind a permit to exactly the fields that decide what it authorises.
 
     Length-prefixed for the same reason core/audit.py is: without it, an asset
@@ -79,7 +80,7 @@ def _seal(asset: str, operation: str, exposure: "Exposure", actor: str) -> str:
     identically, and a permit is precisely where somebody would try that.
     """
     parts = (str(asset), str(operation), str(getattr(exposure, "value", exposure)),
-             str(actor))
+             str(actor), ",".join(sorted(str(a) for a in (addresses or ()))))
     material = "|".join(f"{len(x)}:{x}" for x in parts)
     return hmac.new(_SECRET, material.encode("utf-8"), hashlib.sha256).hexdigest()
 
@@ -109,6 +110,31 @@ OPERATIONS: Dict[str, Exposure] = {
     "port_scan": Exposure.ACTIVE,
     "dns_zone_transfer": Exposure.ACTIVE,
     "subdomain_bruteforce": Exposure.ACTIVE,
+
+    # --- P1 PASSIVE ---
+    "subdomain_index_read": Exposure.PASSIVE,   # read a published name index
+    "web_archive_search": Exposure.PASSIVE,     # query a crawl index
+    # Live resolution through a THIRD-PARTY recursive resolver. Distinct from
+    # `passive_dns` above, which is pinned to its industry meaning: querying a
+    # HISTORICAL passive-DNS database, zero packets toward the name. This one
+    # emits packets. Both are passive; the audit log must tell them apart.
+    #
+    # It is PASSIVE for two reasons, the second decisive. The customer's
+    # authoritative servers see a query from the RESOLVER's address, unattributed
+    # and cache-damped. And `Method.DNS_TXT` ownership verification is itself a
+    # DNS resolution — classifying resolution ACTIVE would make ownership
+    # verification require ownership verification, and nothing could bootstrap.
+    "dns_resolve_recursive": Exposure.PASSIVE,
+    "rdap_lookup": Exposure.PASSIVE,            # registration status of a domain
+
+    # --- P1 ACTIVE ---
+    "dns_resolve_authoritative": Exposure.ACTIVE,  # RD=0, at the customer's NS
+    # A synthesised label is a guaranteed cache miss, so 100% of these reach the
+    # customer's authoritative servers — the exact opposite of the damping that
+    # makes recursive resolution passive. A stream of them under one zone is the
+    # textbook water-torture signature and will be read as an attack.
+    "dns_wildcard_probe": Exposure.ACTIVE,
+    "service_banner_read": Exposure.ACTIVE,     # read-only greeting, non-web port
 
     # FR-GOV-003: reading a public index page is passive collection; presenting
     # credentials to get past a login is participation, and it is not something
@@ -140,9 +166,13 @@ class Permit:
     #: Why it was granted, in words, so an audit payload is not a bare "allowed".
     rationale: str = ""
     _token: str = field(default="", repr=False, compare=False)
+    #: Addresses this permit authorises contact with. Empty means name-only, and
+    #: `egress.tcp` refuses to connect on a name-only permit for ACTIVE work.
+    addresses: Tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        expected = _seal(self.asset, self.operation, self.exposure, self.actor)
+        expected = _seal(self.asset, self.operation, self.exposure, self.actor,
+                         self.addresses)
         if not hmac.compare_digest(str(self._token or ""), expected):
             raise PermissionError(
                 "a Permit may only be issued by core.gate.authorise(); "
@@ -226,6 +256,90 @@ def authorise(asset: str,
                   actor=actor,
                   rationale=f"active collection; {verification.explain(today)}",
                   _token=_seal(asset, operation, exposure, actor))
+
+
+#: Operations whose delivery is to an ADDRESS rather than a name, and which
+#: therefore need at least one address positively in scope. An HTTP request is
+#: routed by Host header and lands on a tenant; a port sweep is delivered to
+#: whatever answers the address, which may be a CDN edge shared with thousands.
+_ADDRESS_DELIVERED = frozenset({"port_scan", "service_banner_read"})
+
+
+def authorise_target(asset: str,
+                     addresses: Sequence[str],
+                     operation: str,
+                     actor: str,
+                     scope: Scope,
+                     verification: Optional[Verification] = None,
+                     kind: Optional[ScopeKind] = None,
+                     today: Optional[date] = None) -> Permit:
+    """`authorise()` for the name, then the addresses. Strictly narrower.
+
+    WHY THE NAME IS NOT ENOUGH — measured, and it makes D10 false as written.
+    A `ScopeRule(CIDR, "104.18.0.0/16", is_exclude=True)` can never fire for a
+    hostname: `scope.resolve("api.example.com", DOMAIN)` is INCLUDED while
+    `scope.resolve("104.18.5.7", CIDR)` is EXCLUDED, and the name-based path
+    never consults the address. So "exclude wins unconditionally" silently loses
+    for exactly the operations that do the connecting.
+
+    The tempting counter-argument — that a Host-routed HTTPS request only reaches
+    the customer's tenant — is false at the transport layer. The TCP connection,
+    the TLS handshake, the resource consumption and the abuse report all land on
+    whoever owns the address.
+    """
+    permit = authorise(asset, operation, actor, scope, verification, kind, today)
+    supplied = tuple(str(a).strip() for a in (addresses or ()) if str(a).strip())
+
+    if permit.exposure is not Exposure.ACTIVE:
+        # Passive work does not connect to the asset, so addresses do not
+        # constrain it. Sealing them anyway would only invite a caller to pass
+        # something meaningless and believe it was checked.
+        return permit
+
+    if not supplied:
+        raise NotInScope(
+            f"{asset}: an active operation must be authorised against the "
+            f"addresses it will actually reach; none were supplied. Resolve the "
+            f"name first and pass the addresses, so CIDR exclusions can apply.")
+
+    op = str(operation).strip().lower()
+
+    for address in supplied:
+        verdict = scope.resolve(address, ScopeKind.CIDR)
+        if verdict.decision is Decision.EXCLUDED:
+            raise NotInScope(
+                f"{asset} resolves to {address}, which {verdict.explain()}. "
+                f"The request would be delivered to an address the operator "
+                f"excluded, whatever the name says.")
+
+    if op in _ADDRESS_DELIVERED:
+        included = [a for a in supplied
+                    if scope.resolve(a, ScopeKind.CIDR).decision is Decision.INCLUDED]
+        if not included:
+            # Ownership is proven over a NAME. A sweep is delivered to an
+            # ADDRESS. A name pointed at a CDN or a SaaS tenant would otherwise
+            # authorise sweeping a third party who consented to nothing.
+            asn_rules = [r for r in scope.rules if r.kind is ScopeKind.ASN]
+            hint = ""
+            if asn_rules:
+                # Measured: scope.resolve("203.0.113.10", ScopeKind.ASN) is
+                # UNSCOPED — there is no IP-to-ASN mapping in this product, so an
+                # ASN rule cannot authorise an address. Say so rather than
+                # letting the operator believe their rule covers this.
+                hint = (" ASN rules exist in scope but cannot be resolved against "
+                        "an address in this release; add an equivalent CIDR rule.")
+            raise NotInScope(
+                f"{asset}: {operation!r} is delivered to an address, and none of "
+                f"{', '.join(supplied)} is INCLUDED by a CIDR rule. Proving you "
+                f"own the name does not establish that you own what it points "
+                f"at.{hint}")
+
+    return Permit(asset=permit.asset, operation=permit.operation,
+                  exposure=permit.exposure, actor=permit.actor,
+                  rationale=permit.rationale + f"; addresses {', '.join(supplied)}",
+                  _token=_seal(permit.asset, permit.operation, permit.exposure,
+                               permit.actor, supplied),
+                  addresses=supplied)
 
 
 def is_permitted(asset: str, operation: str, actor: str, scope: Scope,
