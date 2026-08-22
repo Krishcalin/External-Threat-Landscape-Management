@@ -139,6 +139,44 @@ def cmd_intel(args) -> int:
     return 0
 
 
+def cmd_discover(args) -> int:
+    """Passive CT discovery -> an inventory file the scan reads.
+
+    DISCOVERY WRITES A FILE AND THE SCAN READS IT. Keeping the network off the
+    scan path is what makes a scan reproducible and runnable offline, and it
+    means a discovery run can be reviewed before anything is scored against it.
+    """
+    import csv
+    from collect import ct
+
+    result = ct.discover(args.domain)
+    rows = ct.to_inventory_rows(result)
+
+    print(f"Certificate transparency for {args.domain}")
+    for report in result.sources:
+        state = "ok" if report.ok else "FAILED"
+        print(f"  {report.name:14} {state:7} {report.names_found:4} name(s)"
+              f"{'  ' + report.detail if report.detail else ''}")
+    print()
+    print(result.coverage_note())
+
+    if not rows:
+        print('\nNothing to write.')
+        return 0
+
+    with open(args.out, "w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    wildcards = len(result.names) - len(rows)
+    excluded = (f" ({wildcards} wildcard(s) excluded: a wildcard proves a "
+                f"certificate exists, never a host)" if wildcards else "")
+    print(f"\nWrote {len(rows)} host(s) to {args.out}{excluded}")
+    print("Product is left `unknown` — CT finds names, not technologies, so the "
+          "vulnerability join will not match until fingerprinting fills it in.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="etlm", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -153,6 +191,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     show = sub.add_parser("intel", help="what the vendored catalogue is, and how old")
     show.set_defaults(fn=cmd_intel)
+
+    disc = sub.add_parser(
+        "discover",
+        help="passive certificate-transparency discovery (touches nothing you own)")
+    disc.add_argument("domain", help="apex domain, e.g. example.com")
+    disc.add_argument("-o", "--out", default="discovered.csv",
+                      help="inventory CSV to write (default discovered.csv)")
+    disc.set_defaults(fn=cmd_discover)
     return parser
 
 
