@@ -1,0 +1,10 @@
+hostname,product,vendor,version,owner,environment
+vpn-01.corp.example,Ivanti Connect Secure,Ivanti,22.3R1,Network Team,production
+web-01.corp.example,Apache HTTP Server,Apache,2.4.54,Platform Team,production
+tomcat-03.corp.example,Apache Tomcat,Apache,9.0.65,App Team,production
+mail-01.corp.example,Zimbra,Synacor,8.8.15,Messaging Team,production
+db-02.corp.example,PostgreSQL,PostgreSQL,14.9,Data Team,production
+fw-01.corp.example,FortiOS,Fortinet,7.0.5,Network Team,production
+files-01.corp.example,MOVEit Transfer,Progress,2023.0.1,Finance IT,production
+build-01.corp.example,Jenkins,Jenkins,2.401,Engineering,internal
+legacy-app.corp.example,Acme Widget Manager,Acme Corp,3.1,Unassigned,production
