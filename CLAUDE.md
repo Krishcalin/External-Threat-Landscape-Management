@@ -16,6 +16,58 @@ attacked right now, and who fixes them?*
 
 ---
 
+## The SRS, and where measurement corrected it
+
+`SKOPOS-SRS-v1.0` is the governing specification. Two decisions in it were
+overruled by the sponsor and one research finding in it was wrong; all three are
+recorded here rather than silently applied.
+
+### Overruled by the sponsor, 2026-08-22
+
+| SRS says | Decision | Consequence, accepted |
+|---|---|---|
+| New repo `skopos-etlm`, Apache-2.0 | **Keep this repo, MIT** | No explicit patent grant. Consistent with the rest of the portfolio. |
+| Build multi-tenancy in P0 (~3 weeks) | **Single-org first** | The SRS estimates the retrofit at ~3 months. Mitigated only by avoiding designs that *preclude* tenancy — no global-unique keys where per-org would be needed. FR-M0-001 and RLS are **not** implemented. |
+
+### WS-3 was aimed at the wrong field — measured, 2026-08-22
+
+The SRS calls the 2026 NVD degradation a first-class architectural finding, and
+it is right that it matters. It is wrong about which field fails. Measured
+against the live NVD API across three 2026 windows, 600 CVEs sampled:
+
+| published | no CPE | no CVSS | `Deferred` share of processed |
+|---|---:|---:|---:|
+| March 2026 | 6% | 0% | 6% |
+| May 2026 | 14% | 0% | 14% |
+| August 2026 | 92% | 1% | 75% |
+
+The correlation with `vulnStatus` is deterministic: `Analyzed` and `Modified`
+**always** carry CPE; `Deferred` and `Received` **never** do.
+
+Three corrections:
+
+1. **The status string is `Deferred`.** FR-M2-003 names `Not Scheduled`, which no
+   current record uses — handling written against it would never fire.
+2. **CVSS is not the missing field** (present ~99.5%). §9.1's mandatory
+   missing-data rule is implemented as written and will almost never trigger.
+3. **The degradation lands on MATCHING, not scoring.** CPE is the join key for
+   FR-M2-010. This compounds with the KEV finding below: both halves of the join
+   were degraded and the SRS hardened neither.
+
+**The fix, verified.** `CVE-2026-7518` is `Deferred` with zero CPE, yet its CNA
+record in `cvelistV5` carries **8 explicit affected versions**. CNA
+`affected[].versions[]` survives regardless of NVD state and is *better* than CPE
+— exact versions rather than a match expression. FR-M2-001 already makes
+`cvelistV5` the source of truth; it simply does not connect that choice to this
+problem.
+
+Restated: **do not depend on NVD for CPE. Derive product identity and version
+ranges from CNA records; treat NVD as supplementary enrichment only.**
+
+`core/scoring.py` therefore adds `match_confidence` as a first-class input and
+flags `identity unresolved` — the caveat the SRS does not have and the data says
+is the one that matters.
+
 ## Decisions already made
 
 ### D1 — Hybrid data posture: vendored corpus, opt-in collectors
@@ -135,6 +187,10 @@ etlm/
 ---
 
 ## Status
+
+**TEPS implemented and golden-tested against SRS §9.1** — the published worked
+example reproduces exactly at 78, with every intermediate factor matching
+(E=0.817, X=1.000, A=0.850, B=1.000). 28 tests.
 
 **Phase 1 spine complete** — corpus, models, inventory ingest, matcher, CLI,
 8 tests. Verified end to end against the real catalogue (1,674 entries,
