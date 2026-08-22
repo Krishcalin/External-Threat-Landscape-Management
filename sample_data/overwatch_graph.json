@@ -1,0 +1,33 @@
+{
+  "nodes": [
+    {"id": "internet", "kind": "InternetSource", "props": {}},
+    {"id": "i-0a1b2c3d", "kind": "EC2Instance", "props": {
+      "dns_name": "web-01.corp.example", "account": "123456789012",
+      "region": "ap-south-1", "exposed_ports": [443],
+      "tags": {"Owner": "Platform Team", "Environment": "production"}}},
+    {"id": "i-0e4f5a6b", "kind": "EC2Instance", "props": {
+      "dns_name": "mail-01.corp.example", "account": "123456789012",
+      "region": "ap-south-1", "exposed_ports": [25, 443],
+      "tags": {"Owner": "Messaging Team", "Environment": "production"}}},
+    {"id": "i-0c7d8e9f", "kind": "EC2Instance", "props": {
+      "dns_name": "vpn-01.corp.example", "account": "123456789012",
+      "region": "ap-south-1", "exposed_ports": [443, 22],
+      "tags": {"Owner": "Network Team", "Environment": "production"}}},
+    {"id": "alb-prod", "kind": "LoadBalancer", "props": {
+      "dns_name": "alb-prod.ap-south-1.elb.amazonaws.com",
+      "account": "123456789012", "region": "ap-south-1"}},
+    {"id": "i-shadow01", "kind": "EC2Instance", "props": {
+      "public_ip": "203.0.113.77", "account": "123456789012",
+      "region": "ap-south-1", "exposed_ports": [3389],
+      "tags": {"Environment": "unknown"}}},
+    {"id": "i-noident", "kind": "EC2Instance", "props": {
+      "account": "123456789012", "region": "ap-south-1"}}
+  ],
+  "edges": [
+    {"src": "internet", "dst": "i-0a1b2c3d", "kind": "REACHES"},
+    {"src": "internet", "dst": "i-0c7d8e9f", "kind": "REACHES"},
+    {"src": "internet", "dst": "i-shadow01", "kind": "REACHES"},
+    {"src": "internet", "dst": "i-noident", "kind": "REACHES"},
+    {"src": "alb-prod", "dst": "i-0a1b2c3d", "kind": "TARGETS"}
+  ]
+}
