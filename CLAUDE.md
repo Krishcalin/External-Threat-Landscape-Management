@@ -240,8 +240,70 @@ version 2026.08.21).
 
 ### Next
 
-- [ ] NVD CPE affected ranges → the `VERSION_RANGE` determination (closes D3)
-- [ ] Persistence (PostgreSQL) + run-over-run diff: what is *new* since last scan
-- [ ] Ownership and SLA — the "accountable remediation" half of the objective
-- [ ] FastAPI + TypeScript console
-- [ ] Opt-in collectors (CT logs, DNS) — the "continuously" half
+- [ ] NVD CPE affected ranges - the `VERSION_RANGE` determination (closes D3)
+- [ ] Run-over-run diff: what is *new* since the last scan
+- [ ] Wire the gate into the API and the console (routes + audit payloads)
+- [ ] Active collectors, which are now unable to run without a Permit
+- [ ] Tenancy (FR-M0-001): org_id on every table, RLS, and Postgres roles per org
+
+---
+
+## P0 - governance before capability
+
+The phase deliberately shipped no new collection. It shipped the thing that
+decides whether collection may happen at all.
+
+**D7 - PostgreSQL, not sqlite.** When P0 started the product had no datastore,
+tenancy was deferred, and NFR-USE-003 wants single-node with no mandatory
+external services, so sqlite looked right. The sponsor then stood up
+`skopos-db-1`; a compose file is still single-node, so SRS CON-02 is met rather
+than deferred. `core/store.py` keeps the repository boundary either way, and
+`MemoryStore` exists so refusal tests stay cheap enough to write a lot of.
+
+**D8 - the gate is structural, not conventional.** `core/gate.py` holds the only
+authorisation decision in the product. Collectors do not check ownership; they
+cannot run without a `Permit`, and `Permit.__post_init__` refuses to construct
+one without a token only `authorise()` holds. "Every collector remembers to
+check" is a property that decays with the first third-party plugin; "the unsafe
+path does not exist" does not.
+
+**D9 - three exposure classes, not two.** Passive collection reads third-party or
+already-public sources and needs no ownership proof - demanding one would train
+users to click through ownership prompts. Active collection needs current proof.
+Prohibited operations (FR-GOV-003, FR-GOV-007) are refused *before* scope and
+ownership are consulted, so the refusal cannot be argued around by adding a
+scope rule. An unregistered operation is PROHIBITED, never assumed passive.
+
+**D10 - exclude wins unconditionally.** Not most-specific, not last-wins. Every
+specificity scheme eventually lets a narrow include beat a broad exclude, and
+then the tool probes the thing it was told not to. Asserted over all rule
+permutations in `tests/test_scope.py`.
+
+**D11 - append-only is enforced by the database.** The hash chain in
+`core/audit.py` *detects* tampering. `db/001_schema.sql` *prevents* it:
+DO-INSTEAD-NOTHING rules on UPDATE and DELETE, and the app role granted only
+SELECT and INSERT. Verified live in `tests/test_store_postgres.py`, which builds
+a throwaway database precisely because the real audit log cannot be cleaned up.
+
+**Stated limitation.** A hash chain cannot detect *end*-truncation - nothing in a
+chain commits to its own length. `AuditChain.head` is exposed so an external
+observer can anchor it, and `verify(expected_seq=...)` catches it once someone
+has. This is written down in the module and asserted as a test rather than left
+to be discovered.
+
+**144 tests** (135 offline + 9 live-database; the live ones skip loudly when no
+database is reachable).
+
+---
+
+## Running it
+
+```bash
+cp .env.example .env      # then set POSTGRES_PASSWORD
+docker compose up -d      # skopos-db-1 (postgres:16) + skopos-app-1
+```
+
+Console and API on <http://127.0.0.1:8100>, OpenAPI at `/api/docs`, Postgres on
+`127.0.0.1:55443` (loopback only - the ports avoid the other Phalanx stacks).
+The intelligence corpus is baked into the image, so the container answers
+offline and names the catalogue version it answered from.
