@@ -339,6 +339,112 @@ def cmd_scope_check(args) -> int:
     return 0
 
 
+def cmd_fingerprint(args) -> int:
+    """Identify what each host runs, so the vulnerability join can fire.
+
+    THE LOAD-BEARING COMMAND. Certificate transparency finds names, not
+    technologies, so discovery writes product="unknown" — which matches 0 of the
+    catalogue's 1,674 entries. Until this runs, a 400-host discovery produces
+    zero findings and one number in a warning banner.
+    """
+    import csv
+
+    from collect import egress, fingerprint, http_probe
+    from core.identity import ATTESTATION_MEANING
+
+    store = _store()
+    scope = store.load_scope()
+
+    with open(args.inventory, encoding="utf-8", newline="") as handle:
+        base = list(csv.DictReader(handle))
+    hosts = [str(r.get("identifier") or r.get("hostname") or "").strip()
+             for r in base]
+    hosts = [h for h in hosts if h]
+    if not hosts:
+        print(f"error: no identifier/hostname column in {args.inventory}",
+              file=sys.stderr)
+        return 1
+
+    ports = (http_probe.WEB_PORTS if args.ports == "web"
+             else tuple(int(p) for p in args.ports.split(",")))
+    verifications = {h: store.live_verification(h) for h in hosts}
+
+    if args.dry_run:
+        # gate.plan(), not refusal_reasons(): the latter passes
+        # verification=None and would report every host as unverified by
+        # construction, telling the operator nothing will be touched and then
+        # watching the real run touch things.
+        would, refusals = gate.plan(hosts, http_probe.OPERATION, args.actor,
+                                    scope, verifications)
+        print(f"Would probe {len(would)} of {len(hosts)} host(s) on ports "
+              f"{', '.join(str(p) for p in ports)}")
+        for host in would[:20]:
+            print(f"  {host}")
+        if len(would) > 20:
+            print(f"  ... {len(would) - 20} more")
+        if refusals:
+            print(f"\n{len(refusals)} refused:")
+            for line in refusals[:20]:
+                print(f"  {line[:150]}")
+            if len(refusals) > 20:
+                print(f"  ... {len(refusals) - 20} more")
+        print("\nNothing was contacted.")
+        return 0
+
+    budget = egress.Budget(concurrency=min(args.concurrency,
+                                           egress.MAX_CONCURRENCY),
+                           run_seconds=args.budget)
+    store.append_audit(args.actor, "fingerprint.started",
+                       {"hosts": len(hosts), "ports": list(ports)})
+
+    outcome, coverage = fingerprint.run(hosts, args.actor, scope, verifications,
+                                        ports, budget)
+
+    store.append_audit(args.actor, "fingerprint.completed",
+                       {"probed": len(outcome.fingerprints),
+                        "identified": outcome.identified,
+                        "refused": len(outcome.refused),
+                        "unattempted": len(outcome.unattempted)})
+
+    print(outcome.note())
+    if outcome.refused:
+        print()
+        for host, why in outcome.refused[:10]:
+            print(f"  REFUSED {host}: {why[:120]}")
+        if len(outcome.refused) > 10:
+            print(f"  ... {len(outcome.refused) - 10} more")
+
+    rows = fingerprint.to_inventory_rows(outcome, base)
+    if rows:
+        fields: list = []
+        for row in rows:
+            for key in row:
+                if key not in fields:
+                    fields.append(key)
+        with open(args.out, "w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"\nWrote {len(rows)} row(s) to {args.out}")
+
+    identified = [f for f in outcome.fingerprints if f.identified]
+    if identified:
+        print()
+        for f in identified[:15]:
+            print(f"  {f.host:42} {f.product}"
+                  + (f" ({f.vendor})" if f.vendor else "")
+                  + f"  [{f.attestation.value}]")
+        print()
+        kinds = {f.attestation for f in identified if f.attestation}
+        for kind in sorted(kinds, key=lambda a: a.value):
+            print(f"  {kind.value}: {ATTESTATION_MEANING[kind.value]}")
+
+    print("\nAn observed version is recorded in obs_version and is NEVER used "
+          "as a version determination: a banner is the assertion of the party "
+          "whose patch state is the question.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="etlm", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -405,6 +511,24 @@ def build_parser() -> argparse.ArgumentParser:
                         help="the TXT record, the file URL, or the ticket")
     verify.add_argument("--actor", required=True, help=f"({ACTOR_NOTE})")
     verify.set_defaults(fn=cmd_verify)
+
+    # -- active fingerprinting --------------------------------------------
+    fp = sub.add_parser(
+        "fingerprint",
+        help="identify what each host runs (ACTIVE — verified assets only)")
+    fp.add_argument("inventory", help="a CSV carrying identifier/hostname")
+    fp.add_argument("-o", "--out", default="fingerprinted.csv")
+    fp.add_argument("--actor", required=True, help=f"({ACTOR_NOTE})")
+    fp.add_argument("--ports", default="web",
+                    help="'web' (443,80,8443,8080 — the ports a name-based "
+                         "ownership proof actually covers) or a comma list")
+    fp.add_argument("--concurrency", type=int, default=8)
+    fp.add_argument("--budget", type=float, default=900.0,
+                    help="seconds; when spent, remaining hosts are reported "
+                         "UNATTEMPTED rather than counted as nothing found")
+    fp.add_argument("--dry-run", action="store_true",
+                    help="show what would be probed, contacting nothing")
+    fp.set_defaults(fn=cmd_fingerprint)
     return parser
 
 
