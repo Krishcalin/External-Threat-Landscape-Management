@@ -88,6 +88,48 @@ decision; one who was never told has been misled.
 Live collectors (CT logs, DNS, Shodan) will exist and will be **opt-in and
 documented as partial** — the same shape as MonitorRisk's `collect/` module.
 
+### D6 — OverWatch is the only sibling tool SKOPOS ingests (sponsor, 2026-08-22)
+
+§18 question 4 asked whether SKOPOS should consume findings from the other
+Phalanx tools. Decision: **OverWatch only**, to bring internal cloud context into
+an external platform.
+
+**And the value is not the asset feed.** OverWatch answers *"is this reachable
+from the internet?"* by a completely different method than SKOPOS — a four-gate
+cloud model (public IP, ACTIVE IGW default route, security-group world-open
+ports, and a stateless NACL permitting both the inbound port and the ephemeral
+return) versus an actual probe from outside. `aws_exposure.py` explicitly refuses
+to conclude from `0.0.0.0/0` alone, calling it the industry's number-one false
+positive.
+
+Two independent methods answering one question can **disagree**, and each
+disagreement is a finding neither tool produces alone:
+
+| SKOPOS | OverWatch | outcome |
+|---|---|---|
+| reachable | reachable | `confirmed` — two methods agree |
+| reachable | not reachable | **`unexplained_exposure`** — something answers that the cloud model does not account for |
+| not reachable | reachable | **`discovery_blind_spot`** — the model says exposed, discovery missed it |
+| not reachable | not reachable | `agreed_not_exposed` |
+
+The middle two rows are the whole reason for the integration, so `reconcile()`
+never resolves a disagreement by preferring a source, and "no verdict" is
+`inconclusive` — never agreement.
+
+**Reachability is read from the graph's SHAPE** (an edge from an `InternetSource`
+node) rather than from a property like `is_public`, which would break the first
+time that property came to mean "has a public IP" instead of "is actually
+reachable" — the exact distinction OverWatch's oracle exists to draw.
+
+**Taken:** external identity, ownership/account/region/tags (accountable
+remediation is half the objective), exposed ports, and fronting — CloudFront/ALB
+is literally the `M` mitigation term in §9.1, so it becomes evidence rather than
+an assumption.
+
+**Not taken:** OverWatch's findings and severities. SKOPOS scores with TEPS, and
+importing a second scoring opinion gives one asset two numbers with no way to
+reconcile them. Its observations are welcome; its verdicts are its own.
+
 ### D2 — First slice: exposure × actively-exploited
 
 Not attack-surface discovery, not brand protection, not credential leakage.
