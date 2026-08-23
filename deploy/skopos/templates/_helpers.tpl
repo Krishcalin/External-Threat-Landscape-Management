@@ -44,6 +44,25 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
       key: {{ .Values.database.runtimeSecret.key }}
 - name: SKOPOS_ORG_ID
   value: {{ .Values.tenancy.orgId | quote }}
+{{- if .Values.auth.pendingSecret.name }}
+- name: SKOPOS_PENDING_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.auth.pendingSecret.name }}
+      key: {{ .Values.auth.pendingSecret.key }}
+{{- end }}
+{{- if .Values.auth.bootstrapSecret.name }}
+- name: SKOPOS_BOOTSTRAP_USER
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.auth.bootstrapSecret.name }}
+      key: username
+- name: SKOPOS_BOOTSTRAP_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.auth.bootstrapSecret.name }}
+      key: password
+{{- end }}
 {{- if .Values.api.tokenSecret.name }}
 - name: SKOPOS_API_TOKEN
   valueFrom:

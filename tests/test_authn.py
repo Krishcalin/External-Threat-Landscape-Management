@@ -184,6 +184,22 @@ def enrolled(store):
             "password": "a-long-enough-passphrase"}
 
 
+def _with_margin(seconds: float = 5.0) -> None:
+    """Wait until the current TOTP step has room left in it.
+
+    Without this, a test that logs in twice can straddle a 30-second boundary:
+    the code it is replaying ages out of the ±1 drift window entirely, verify
+    finds no match at all, and the replay assertion fails against "that code is
+    not valid" instead of "already been used". That is a flake in the test, not
+    a defect in the guard — but a suite that fails once a fortnight at 00:29:58
+    is a suite people stop believing.
+    """
+    import time
+    remaining = totp.PERIOD - (time.time() % totp.PERIOD)
+    if remaining < seconds:
+        time.sleep(remaining + 0.2)
+
+
 def _next_code(secret):
     """The code for the FOLLOWING step, which is what a real user reads.
 
@@ -243,6 +259,7 @@ def test_a_replayed_code_is_refused_and_says_so(store, enrolled):
     30-second step is refused, and 'that code is not valid' for six digits the
     phone is displaying reads as a broken product."""
     from core.auth_store import LoginFailed
+    _with_margin()
     code = _next_code(enrolled["secret"])
     _login(store, enrolled, code)
     with pytest.raises(LoginFailed) as exc:

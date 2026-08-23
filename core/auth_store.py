@@ -25,8 +25,12 @@ nothing they can learn about the second factor.
 """
 from __future__ import annotations
 
+import base64
+import hmac
+import hashlib
 import os
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Protocol
 
@@ -43,6 +47,52 @@ BOOTSTRAP_PASSWORD_ENV = "SKOPOS_BOOTSTRAP_PASSWORD"
 #: How long the between-factors token lives. Long enough to read a code off a
 #: phone, short enough that a stolen one is useless by the time it is noticed.
 PENDING_TTL_SECONDS = 180
+
+#: Seals the pending token. Regenerated per process, so a restart invalidates
+#: half-completed logins — which is correct: a login in progress should not
+#: survive the process that started it.
+#:
+#: `SKOPOS_PENDING_SECRET` overrides it, and MUST be set when more than one
+#: replica serves traffic, or a token minted on one pod is meaningless on
+#: another. The Helm chart runs replicaCount 2.
+_PENDING_SECRET = (os.environ.get("SKOPOS_PENDING_SECRET", "").encode("utf-8")
+                   or secrets.token_bytes(32))
+
+
+def _seal_pending(user_id: int, expires_at: int) -> str:
+    """A self-contained claim: `user_id.expiry.mac`, base64url.
+
+    STATELESS ON PURPOSE. The first version kept these in a dict on the store
+    instance, and `_store()` builds a new instance per request — so `login`
+    minted a token that `enrol` had never heard of. The same design would have
+    failed across Kubernetes replicas even with a process-lifetime store.
+
+    Replay inside the window is acceptable and worth being explicit about: this
+    token alone grants nothing. A session still requires a TOTP code, and that
+    code is single-use against `totp_last_counter`.
+    """
+    payload = f"{int(user_id)}.{int(expires_at)}".encode("ascii")
+    mac = hmac.new(_PENDING_SECRET, payload, hashlib.sha256).digest()[:16]
+    return base64.urlsafe_b64encode(payload + b"." + mac).decode("ascii").rstrip("=")
+
+
+def _open_pending(token: str) -> Optional[int]:
+    """The user id inside a pending token, or None. Constant-time."""
+    try:
+        raw = (token or "").encode("ascii")
+        raw += b"=" * (-len(raw) % 4)
+        decoded = base64.urlsafe_b64decode(raw)
+        payload, _, mac = decoded.rpartition(b".")
+        user_id_text, _, expiry_text = payload.decode("ascii").partition(".")
+        expected = hmac.new(_PENDING_SECRET, payload, hashlib.sha256).digest()[:16]
+        if not hmac.compare_digest(mac, expected):
+            return None
+        if int(expiry_text) < int(time.time()):
+            return None
+        return int(user_id_text)
+    except Exception:                                          # noqa: BLE001
+        # A malformed token is a refusal, never a crash on the login path.
+        return None
 
 
 class LoginFailed(authn.AuthError):
@@ -103,11 +153,6 @@ class PostgresAuthStore:
         if migrate and is_admin:
             from core import migrate as _migrate
             _migrate.ensure_once(self._dsn)
-        # Pending logins are held in memory rather than in a table. They live
-        # for three minutes and a restart invalidating them is correct
-        # behaviour, not data loss — a half-completed login should not survive
-        # the process it started in.
-        self._pending: Dict[str, Dict[str, Any]] = {}
 
     def _connect(self):
         """A connection bound to an organisation.
@@ -192,22 +237,18 @@ class PostgresAuthStore:
                 cur.execute("UPDATE app_user SET password_hash = %s WHERE id = %s",
                             (authn.hash_password(password), user["id"]))
 
-        pending = secrets.token_urlsafe(32)
-        self._pending[pending] = {
-            "user_id": user["id"],
-            "expires": _now() + timedelta(seconds=PENDING_TTL_SECONDS),
-        }
+        pending = _seal_pending(user["id"],
+                                int(time.time()) + PENDING_TTL_SECONDS)
         raise SecondFactorRequired(pending, bool(user["totp_enrolled_at"]))
 
     def complete_login(self, pending: str, code: str,
                        user_agent: str = "") -> Dict[str, Any]:
         """Check the second factor and issue a session."""
-        record = self._pending.get(pending or "")
-        if record is None or record["expires"] < _now():
-            self._pending.pop(pending or "", None)
+        user_id = _open_pending(pending)
+        if user_id is None:
             raise LoginFailed("this login attempt has expired; start again")
 
-        user = self._user_by_id(record["user_id"])
+        user = self._user_by_id(user_id)
         if user is None or not user["totp_secret"]:
             raise LoginFailed("this account has no second factor enrolled")
 
@@ -240,7 +281,6 @@ class PostgresAuthStore:
                 cur.execute("UPDATE app_user SET totp_last_counter = %s"
                             " WHERE id = %s", (counter, user["id"]))
 
-        self._pending.pop(pending, None)
         return self._issue_session(user, user_agent)
 
     def _issue_session(self, user: Dict[str, Any], user_agent: str) -> Dict[str, Any]:
@@ -386,10 +426,16 @@ def bootstrap(store: AuthStore, org_id: str = "default") -> Optional[str]:
     return username
 
 
+def open_pending(token: str) -> Optional[int]:
+    """The user id inside a pending token, for the route layer."""
+    return _open_pending(token)
+
+
 def open_auth_store(dsn: Optional[str] = None) -> AuthStore:
     return PostgresAuthStore(dsn)
 
 
 __all__ = ["AuthStore", "PostgresAuthStore", "open_auth_store", "bootstrap",
+           "open_pending",
            "LoginFailed", "SecondFactorRequired", "BOOTSTRAP_USER_ENV",
            "BOOTSTRAP_PASSWORD_ENV", "PENDING_TTL_SECONDS"]

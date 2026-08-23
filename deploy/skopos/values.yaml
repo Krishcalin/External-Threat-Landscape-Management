@@ -73,6 +73,21 @@ itsm:
     name: ""
     key: token
 
+auth:
+  # REQUIRED WHEN replicaCount > 1, and this chart defaults to 2. The
+  # between-factors token is sealed with this rather than stored, so a login
+  # started on one pod cannot be completed on another unless every pod shares
+  # the secret. Leaving it unset on a multi-replica deployment produces
+  # intermittent "this login attempt has expired" that looks like a clock issue.
+  pendingSecret:
+    name: ""
+    key: secret
+  # The first administrator. A Secret with `username` and `password` keys,
+  # applied once against an empty user table. Until a user exists the console is
+  # OPEN and says so on /health and across every page.
+  bootstrapSecret:
+    name: ""
+
 scheduler:
   # EPSS publishes today's scores and never republishes yesterday's, so every
   # day this does not run is a permanent hole in every velocity figure computed

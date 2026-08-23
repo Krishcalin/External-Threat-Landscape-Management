@@ -53,6 +53,22 @@ services:
       # of db/*.sql because a password in a migration is a password in the repo.
       SKOPOS_APP_PASSWORD: ${SKOPOS_APP_PASSWORD:-}
       SKOPOS_ORG_ID: ${SKOPOS_ORG_ID:-default}
+      # The FIRST administrator, applied once against an empty user table and
+      # ignored thereafter. There is no default credential: admin/admin is a
+      # published credential on every install that forgets to change it, and an
+      # auto-generated one printed to stdout lands in logs that are aggregated,
+      # shipped and retained.
+      #
+      # Until one exists the console is OPEN and says so on /health and across
+      # the top of every page. Authentication enforces itself the moment a user
+      # is created.
+      # Seals the between-factors token. MUST be set when more than one
+      # replica serves traffic, or a login started on one pod cannot be
+      # completed on another. Unset is fine for a single container: a fresh
+      # per-process secret just invalidates half-finished logins on restart.
+      SKOPOS_PENDING_SECRET: ${SKOPOS_PENDING_SECRET:-}
+      SKOPOS_BOOTSTRAP_USER: ${SKOPOS_BOOTSTRAP_USER:-}
+      SKOPOS_BOOTSTRAP_PASSWORD: ${SKOPOS_BOOTSTRAP_PASSWORD:-}
       SKOPOS_CONSOLE_DIR: /app/frontend/dist
       # Unset by default, and that is the safe state: without it the takeover
       # route and the TAXII server are NOT REGISTERED AT ALL. Both serve

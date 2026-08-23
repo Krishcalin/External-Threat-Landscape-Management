@@ -24,11 +24,20 @@ const BASE = 'http://127.0.0.1:8100/api/v1'
 // That happened: a first run against a still-warming container reported every
 // panel "ok" while two of them had rendered their empty states.
 let fetchFailures = 0
+let unauthorised = 0
+// A session cookie, for a console with authentication enforced. Obtain one by
+// logging in and copying the `skopos_session` cookie:
+//   SKOPOS_RENDER_CHECK_COOKIE=skopos_session=... npm run render-check
+const COOKIE = process.env.SKOPOS_RENDER_CHECK_COOKIE ?? ''
+
 const get = async (p: string) => {
-  const r = await fetch(`${BASE}${p}`)
+  const r = await fetch(`${BASE}${p}`,
+    COOKIE ? { headers: { cookie: COOKIE } } : undefined)
   if (!r.ok) {
-    fetchFailures++
-    console.log(`  FETCH ${p} -> HTTP ${r.status}`)
+    // 401 is a DIFFERENT failure from a broken endpoint, and reporting them
+    // identically sends somebody debugging a panel that is fine.
+    if (r.status === 401) unauthorised++
+    else { fetchFailures++; console.log(`  FETCH ${p} -> HTTP ${r.status}`) }
     return null
   }
   return await r.json()
@@ -82,10 +91,19 @@ async function main() {
       console.log(`  THROW ${name.padEnd(24)} ${(e as Error).message}`)
     }
   }
+  if (unauthorised) {
+    console.log(`
+  ${unauthorised} endpoint(s) returned 401: this console has`
+                + ` authentication ENFORCED and this check has no session.`)
+    console.log('  The panels above rendered their EMPTY states, not their real'
+                + ' content.')
+    console.log('  Log in, copy the skopos_session cookie, and re-run with'
+                + ' SKOPOS_RENDER_CHECK_COOKIE=skopos_session=<value>')
+  }
   if (fetchFailures) {
     console.log(`  ${fetchFailures} endpoint(s) did not answer; the "ok" rows`
                 + ` above may be empty states rather than rendered panels`)
   }
-  process.exit(failed || fetchFailures ? 1 : 0)
+  process.exit(failed || fetchFailures || unauthorised ? 1 : 0)
 }
 main()

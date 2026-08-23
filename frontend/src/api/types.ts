@@ -406,3 +406,44 @@ export interface ChangesView {
   changed_band: number
   carried: number
 }
+
+/* ── authentication ────────────────────────────────────────────────────────
+ * No token type appears here, because the console never holds one: the session
+ * arrives as an HttpOnly cookie the browser attaches and JavaScript cannot
+ * read. */
+
+export interface AuthStatus {
+  enforced: boolean
+  users: number | null
+  /** Rendered verbatim when `enforced` is false. An open console that does not
+   *  say so is indistinguishable from a protected one. */
+  state: string
+}
+
+export interface Session {
+  username: string
+  org_id: string
+  display_name: string
+  expires_at: string
+}
+
+export interface PendingLogin {
+  pending: string
+  /** False means send them to enrolment, not to a code field they cannot
+   *  fill. */
+  enrolled: boolean
+  next: string
+}
+
+export interface Enrolment {
+  secret: string
+  formatted: string
+  uri: string
+  note: string
+}
+
+export interface EnrolConfirmed {
+  recovery_codes: string[]
+  note: string
+  next: string
+}

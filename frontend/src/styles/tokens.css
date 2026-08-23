@@ -331,3 +331,72 @@ tbody tr:hover { background: var(--panel2); }
 @media (max-width: 720px) {
   .tabs { top: 61px; padding: 0 var(--space-3); overflow-x: auto; }
 }
+
+/* ── the landing page ──────────────────────────────────────────────────────
+   A centred card on the product's own gradient. Deliberately quiet: a login
+   screen is a thing somebody passes through in four seconds, and drama here
+   costs those four seconds every single day. */
+.login-shell {
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--space-5);
+  background:
+    radial-gradient(circle at 20% 10%,
+      color-mix(in srgb, var(--grad1) 14%, transparent), transparent 45%),
+    radial-gradient(circle at 85% 85%,
+      color-mix(in srgb, var(--grad3) 16%, transparent), transparent 45%),
+    var(--canvas);
+}
+
+.login-card {
+  width: 100%; max-width: 420px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-6);
+  box-shadow: var(--shadow);
+}
+
+.login-title {
+  font-size: 20px; font-weight: 700; letter-spacing: -.02em;
+  margin: 0 0 var(--space-2);
+}
+
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field span { font-size: 12px; font-weight: 600; color: var(--ink2); }
+.field input {
+  font: inherit; font-size: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--panel2); color: var(--ink);
+}
+.field input:focus-visible { border-color: var(--accent); }
+
+.secret-box {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: var(--space-3);
+  background: var(--panel2); border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+/* Wraps rather than scrolls: somebody is reading this onto a phone keypad and
+   a horizontally-scrolling secret is how a character gets missed. */
+.secret-key {
+  font-size: 15px; letter-spacing: .08em; word-break: break-all;
+}
+
+.recovery-list {
+  list-style: none; margin: 0; padding: var(--space-3);
+  background: var(--panel2); border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px;
+  font-size: 14px; letter-spacing: .04em;
+}
+
+/* Not dismissible, and it sits above everything. An open console that can be
+   made to look protected by clicking an X is worse than one with no banner. */
+.open-banner {
+  position: sticky; top: 0; z-index: 20;
+  border-radius: 0; border-left-width: 0;
+  border-bottom: 2px solid var(--crit);
+  text-align: center;
+}

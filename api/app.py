@@ -97,6 +97,8 @@ def health() -> Dict[str, Any]:
                            else "not registered — set SKOPOS_API_TOKEN"),
         "taxii": ("registered at /taxii2/" if TAXII_REGISTERED
                   else "not registered — set SKOPOS_API_TOKEN"),
+        # Reported, never inferred: an unauthenticated console must say so.
+        "auth": _auth_routes.auth_status(),
     }
 
 
@@ -641,6 +643,15 @@ def _register_taxii(application: FastAPI) -> bool:
 
 
 TAXII_REGISTERED = _register_taxii(app)
+
+# ---------------------------------------------------------------------------
+# Authentication. The middleware registered here binds tenancy.using(org) around
+# EVERY request, including routes written by somebody who has never heard of
+# tenancy — which is the failure mode P5 recorded and this closes.
+from api import auth_routes as _auth_routes             # noqa: E402
+
+AUTH_REGISTERED = _auth_routes.register(app)
+BOOTSTRAPPED = _auth_routes.bootstrap_from_env()
 
 
 
