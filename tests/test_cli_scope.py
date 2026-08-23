@@ -95,7 +95,8 @@ def test_scope_add_then_discover_is_authorised(dsn):
                "--actor", "k.de").returncode == 0
     result = run(dsn, "discover", "example.com", "--actor", "k.de", "--dry-run")
     assert result.returncode == 0, result.stderr
-    assert "Would run ct_log_search" in result.stdout
+    assert "Would query" in result.stdout
+    assert "ct_log_search" in result.stdout, "the operations must be named"
     assert "Nothing was contacted" in result.stdout
 
 
@@ -103,7 +104,7 @@ def test_the_dry_run_contacts_nothing(dsn):
     """A preview that reaches the network is not a preview."""
     result = run(dsn, "discover", "example.com", "--actor", "k.de", "--dry-run")
     assert "Nothing was contacted" in result.stdout
-    assert "certspotter        ok" not in result.stdout
+    assert "16 of" not in result.stdout, "a preview must not carry live counts"
 
 
 # -- exclusions --------------------------------------------------------------

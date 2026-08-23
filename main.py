@@ -18,6 +18,7 @@ from core.ownership import Method, Verification   # noqa: E402
 from core.scope import ScopeKind, ScopeRule       # noqa: E402
 from core.store import StoreUnavailable, open_store  # noqa: E402
 from collect import ct as ct_module                # noqa: E402
+from collect import run as _run_module             # noqa: E402
 
 #: Said wherever an actor is taken. The audit chain attributes a CLAIM, not an
 #: identity — there is no authentication behind this string, and a reader who
@@ -159,75 +160,103 @@ def cmd_intel(args) -> int:
 
 
 def cmd_discover(args) -> int:
-    """Passive CT discovery -> an inventory file the scan reads.
+    """Passive multi-source discovery -> an inventory file the scan reads.
 
     DISCOVERY WRITES A FILE AND THE SCAN READS IT. Keeping the network off the
     scan path is what makes a scan reproducible and runnable offline, and it
     means a discovery run can be reviewed before anything is scored against it.
     """
     import csv
-    from collect import ct
+
+    from collect import discovery, registry, run as discovery_run
 
     store = _store()
     scope = store.load_scope()
+    requested = list(args.source) if args.source else None
 
-    # The gate decides, before anything is contacted. An apex nobody put in
-    # scope is refused here and propagates to exit 3 — not filed as a per-source
-    # coverage line, which would tell the operator a source was down when in
-    # fact they never declared the domain.
-    permit = gate.authorise(args.domain, ct.OPERATION, args.actor, scope)
-    store.append_audit(args.actor, "discovery.authorised",
-                       {"apex": args.domain, "operation": ct.OPERATION,
-                        "rationale": permit.rationale})
+    if args.list_sources:
+        print(f"Terms last reviewed {registry.TERMS_REVIEWED_ON}\n")
+        for source in registry.REGISTRY:
+            state = "on" if source.default_on else "off"
+            print(f"  {source.name:14} {source.data_class.value:8} "
+                  f"{source.terms.value:14} default {state}")
+            if source.note:
+                print(f"                 {source.note}")
+        return 0
 
     if args.dry_run:
-        print(f"Would run {ct.OPERATION} against {args.domain}")
-        print(f"  {permit.rationale}")
-        print(f"  sources: {', '.join(f.__name__ for f in ct.SOURCES)}")
+        preview = discovery_run.plan(args.domain, args.actor, scope, requested,
+                                     args.allow_noncommercial)
+        print(f"Would query {len(preview['sources'])} source(s) for "
+              f"{args.domain}: {', '.join(preview['sources'])}")
+        print(f"  operations: {', '.join(preview['operations'])}")
+        print(f"  {preview['rationale']}")
+        if preview["not_querying"]:
+            print("\n  NOT querying:")
+            for name, outcome, detail in preview["not_querying"]:
+                print(f"    {name:14} {outcome:13} {detail}")
         print("\nNothing was contacted.")
         return 0
 
-    result = ct.discover(args.domain, permit)
-    rows = ct.to_inventory_rows(result)
+    store.append_audit(args.actor, "discovery.authorised",
+                       {"apex": args.domain, "sources": requested or "default"})
 
-    print(f"Certificate transparency for {args.domain}")
+    result = discovery_run.run_sources(args.domain, args.actor, scope, requested,
+                                       args.allow_noncommercial)
+
+    print(f"Passive discovery for {args.domain}")
     for report in result.sources:
         print("  " + report.line())
     print()
-    print(result.coverage_note())
+    print(result.coverage_note(scope))
 
     store.append_audit(args.actor, "discovery.completed",
-                       {"apex": args.domain,
-                        "names": len(result.names),
+                       {"apex": args.domain, "names": len(result.names),
+                        "excluded": len(result.excluded),
                         "sources": [{"name": r.name, "outcome": r.outcome.value,
                                      "contributed": r.contributed,
                                      "returned": r.returned, "detail": r.detail}
                                     for r in result.sources]})
 
-    if result.blackout:
-        # Raised, not returned as a clean zero. On the one command whose
-        # characteristic failure is "the estate looks smaller than it is", an
-        # empty result with a success exit code is the worst available answer.
-        # The audit record above is written FIRST, because the run where every
-        # source failed is exactly the run where "who did we contact, and what
-        # did they say" is the whole question.
-        raise ct.DiscoveryUnavailable(result.coverage_note())
+    if result.excluded:
+        print(f"\n{len(result.excluded)} name(s) matched an exclusion and were "
+              f"NOT written:")
+        for item in result.excluded[:10]:
+            print(f"  {item.name}: {item.reason[:100]}")
+        if len(result.excluded) > 10:
+            print(f"  ... {len(result.excluded) - 10} more")
 
+    if result.blackout:
+        raise discovery_run.DiscoveryUnavailable(result.coverage_note(scope))
+
+    rows = discovery.to_inventory_rows(result)
     if not rows:
-        print("\nNo names in scope were found, and every source answered. "
-              "That is a real result, not an outage.")
+        print("\nNo names in scope were found, and at least one source "
+              "answered. That is a real result, not an outage.")
         return 0
 
+    fields: list = []
+    for row in rows:
+        for key in row:
+            if key not in fields:
+                fields.append(key)
     with open(args.out, "w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
-    wildcards = len(result.names) - len(rows)
-    excluded = (f" ({wildcards} wildcard(s) excluded: a wildcard proves a "
-                f"certificate exists, never a host)" if wildcards else "")
-    print(f"\nWrote {len(rows)} host(s) to {args.out}{excluded}")
-    print("Product is left `unknown` — CT finds names, not technologies, so the "
-          "vulnerability join will not match until fingerprinting fills it in.")
+
+    # Counted separately rather than inferred from a subtraction. The old
+    # `len(names) - len(rows)` attributed every absent name to wildcards, so a
+    # run with one wildcard and two exclusions printed a confident claim about
+    # three wildcards that was true of one.
+    wildcards = sum(1 for n in result.names if n.is_wildcard)
+    print(f"\nWrote {len(rows)} host(s) to {args.out}")
+    if wildcards:
+        print(f"  {wildcards} wildcard(s) excluded: a wildcard proves a "
+              f"certificate exists, never a host")
+    print("Product is left `unknown` — these sources find names, not "
+          "technologies. Run `fingerprint` to fill it, or the vulnerability "
+          "join cannot fire.")
     return 0
 
 
@@ -471,6 +500,15 @@ def build_parser() -> argparse.ArgumentParser:
     disc.add_argument("--dry-run", action="store_true",
                       help="resolve scope and report what would be contacted, "
                            "without contacting anything")
+    disc.add_argument("--source", action="append", default=None,
+                      help="query only this source (repeatable); "
+                           "--list-sources shows them all")
+    disc.add_argument("--list-sources", action="store_true",
+                      help="every registered source, its terms and its default")
+    disc.add_argument("--allow-noncommercial", action="store_true",
+                      help="accept sources whose terms read as excluding "
+                           "commercial use; SKOPOS will not make that call "
+                           "for you")
     disc.set_defaults(fn=cmd_discover)
 
     # -- scope -------------------------------------------------------------
@@ -573,7 +611,8 @@ def main(argv=None) -> int:
     except intel.IntelUnavailable as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    except ct_module.DiscoveryUnavailable as exc:
+    except (ct_module.DiscoveryUnavailable,
+            _run_module.DiscoveryUnavailable) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except FileNotFoundError as exc:
