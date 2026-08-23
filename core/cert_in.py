@@ -226,6 +226,114 @@ def observability_note() -> Dict[str, Any]:
     }
 
 
-__all__ = ["REPORTING_WINDOW", "DIRECTIVE", "REVIEWED_ON", "Category",
+__all__ = ["notification_draft", "TO_COMPLETE", "DRAFT_HEADER",
+           "REPORTING_WINDOW", "DIRECTIVE", "REVIEWED_ON", "Category",
            "Detectability", "OBSERVABILITY", "WHY_NOT_AUTOMATIC",
            "Declaration", "DeclarationInvalid", "Clock", "observability_note"]
+
+
+# ---------------------------------------------------------------------------
+# The notification draft.
+#
+# Every judgement is left blank and marked. SKOPOS fills in only what it can
+# substantiate from its own records — which asset, which vulnerability, since
+# when it was externally visible, what the evidence was, who owns it. The
+# impact, the root cause and the remedial action are the reporter's to write,
+# because this product does not know them and a pre-filled guess would be
+# submitted verbatim by somebody under a six-hour deadline.
+# ---------------------------------------------------------------------------
+
+#: Marks a field the reporter must complete. Deliberately conspicuous: a draft
+#: that reads as finished is a draft somebody files without reading.
+TO_COMPLETE = "[TO BE COMPLETED BY REPORTER]"
+
+DRAFT_HEADER = (
+    "DRAFT — NOT A FILED REPORT\n"
+    "This document was assembled by SKOPOS from its own observations. It has "
+    "not been submitted to anybody. Whether this event is reportable is a legal "
+    "determination about your organisation; the text of "
+    "{directive} is the authority, not this draft. Review every field, complete "
+    "the ones marked, and submit through the official channel."
+).format(directive=DIRECTIVE)
+
+
+def notification_draft(declaration: "Declaration",
+                       clock: Optional["Clock"] = None,
+                       now: Optional[datetime] = None,
+                       organisation: str = "") -> str:
+    """A CERT-In incident notification draft, with the judgements left blank.
+
+    Takes a Declaration, so it cannot be produced without a human having first
+    stated that they became aware of an incident. There is no path from a
+    finding to this document.
+    """
+    running = clock or Clock(declaration)
+    lines: List[str] = [
+        DRAFT_HEADER, "",
+        "=" * 72,
+        "INCIDENT NOTIFICATION TO CERT-In", "=" * 72, "",
+        f"Directive                : {DIRECTIVE}",
+        f"Reporting window         : {int(REPORTING_WINDOW.total_seconds() // 3600)} hours from becoming aware",
+        f"Awareness declared at    : {declaration.became_aware_at.isoformat(timespec='minutes')}",
+        f"Declared by              : {declaration.declared_by}",
+        f"Deadline                 : {running.deadline.isoformat(timespec='minutes')}",
+        f"Status                   : {running.explain(now)}",
+        "",
+        f"Organisation             : {organisation or TO_COMPLETE}",
+        f"Incident category        : {declaration.category.label}",
+        "",
+        "-" * 72,
+        "1. WHAT HAPPENED (reporter's account)", "-" * 72,
+        declaration.summary, "",
+        "-" * 72,
+        "2. AFFECTED ASSETS — from SKOPOS records", "-" * 72,
+    ]
+
+    if not declaration.related_findings:
+        lines.append("  (none linked to this declaration)")
+    for finding in declaration.related_findings:
+        lines.extend([
+            f"  Asset          : {finding.get('asset', TO_COMPLETE)}",
+            f"  Product        : {finding.get('product', 'not identified')}",
+            f"  Vulnerability  : {finding.get('cve', '-')} "
+            f"({finding.get('vulnerability', '')})",
+            f"  Owner          : {finding.get('owner') or TO_COMPLETE}",
+            f"  Basis          : {_basis_sentence(finding)}",
+        ])
+        for line in (finding.get("evidence") or [])[:4]:
+            lines.append(f"    evidence     : {line}")
+        lines.append("")
+
+    lines.extend([
+        "-" * 72,
+        "3. FIELDS SKOPOS CANNOT SUPPLY", "-" * 72,
+        "  These are judgements about your organisation. This product does not",
+        "  know them, and a pre-filled guess would be filed verbatim by somebody",
+        "  working against a six-hour deadline.", "",
+        f"  Impact on operations   : {TO_COMPLETE}",
+        f"  Data affected          : {TO_COMPLETE}",
+        f"  Root cause             : {TO_COMPLETE}",
+        f"  Remedial action taken  : {TO_COMPLETE}",
+        f"  Contact for follow-up  : {TO_COMPLETE}",
+        "",
+        "=" * 72,
+        "END OF DRAFT — review before submission. Nothing has been sent.",
+        "=" * 72,
+    ])
+    return "\n".join(lines)
+
+
+def _basis_sentence(finding: Dict[str, Any]) -> str:
+    """Carry the worklist/determination distinction into the regulator's copy.
+
+    A notification that describes a heuristic product-name match as a confirmed
+    vulnerable version would be overstating to a regulator, which is a worse
+    place to overstate than a dashboard.
+    """
+    if str(finding.get("basis")) == "version_range":
+        return ("version compared against a published affected range "
+                "(determination)")
+    return ("product name corresponds to a known-exploited vulnerability; the "
+            "version was NOT compared (worklist entry, not a confirmed "
+            "vulnerable version)")
+

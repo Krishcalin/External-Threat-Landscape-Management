@@ -47,7 +47,7 @@
 
 > **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — the full architecture: the
 > authorisation gate, the egress boundary, the pipeline, the storage model, the
-> module map, and the thirteen invariants a change must not break. Read this
+> module map, and the nineteen invariants a change must not break. Read this
 > before modifying anything.
 
 ---
@@ -78,6 +78,30 @@ affected range is evaluated against.
 that would establish it is registering the resource, which this product refuses
 to perform. The ceiling is permanent, and the reason given is capability, not
 caution.
+
+**An exposure is not an incident, so nothing here starts a regulatory clock.**
+CERT-In Direction No. 20(3)/2022 requires reporting within six hours of becoming
+aware of an incident. Seven of its eight reportable categories describe something
+an adversary *did*, and this product looks at your estate from outside — so it
+cannot observe them, and says which ones and why. There is no function that opens
+a six-hour countdown from a finding, because a tool that did would push its users
+toward over-reporting to a national CERT. The clock takes a declaration by a
+named person; the notification draft leaves impact, root cause and remediation
+marked `[TO BE COMPLETED BY REPORTER]` rather than guessing them.
+
+**It does not decide what is Critical Information Infrastructure.** Under s.70 of
+the IT Act, 2000, the appropriate Government declares a computer resource a
+protected system by notification in the Official Gazette. That is a legal status,
+not something inferable from a hostname. The CII register records what *your
+organisation* declared, with the basis attached, and refuses a gazette claim that
+carries no notification reference. Assets with no designation are raised as a
+question, never as a finding.
+
+**No coverage percentage, against any framework.** The control mapping says what
+each control it touches is *contributed to*, what it explicitly does **not** do,
+and which evidence it draws on. A percentage would be summed and shown to a
+board, and the board would be receiving a number no external scanner has the
+basis to produce.
 
 **A thin result is not a clean estate.** Every run reports what it could *not*
 see: sources that failed, sources left out by their terms, names the gate
@@ -307,15 +331,25 @@ zero results.
 
 ## 10. Project status
 
-**P0 and P1 complete.** 414 tests (384 offline, 30 against a live PostgreSQL).
+**P0 through P4 complete.** 662 tests (632 offline, 30 against a live PostgreSQL).
 
 **Shipping:** passive discovery across four data classes, DNS records with
 run-over-run change tracking, dangling-record assessment, gated active
 fingerprinting, the exposure join, TEPS scoring, OverWatch reconciliation,
-run-over-run finding diff, and the governance layer underneath all of it.
+run-over-run finding diff, CNA affected-range determinations, SSVC decisions,
+the Crosshair convergence view, the forecast record and its backtesting
+scoreboard, the India compliance pack, and the governance layer underneath all
+of it.
 
-**Next:** CNA affected ranges — the only thing that turns a worklist into a
-verdict — then the forecast record that makes accuracy measurable.
+**What each phase measured before it built.** P2 found that only **47.5%** of KEV
+carries version data comparable enough to turn a worklist entry into a
+determination, and says so on every run. P3 tried the ATT&CK triad, found a
+technique implicates a **median of 57 threat groups**, and shipped SSVC instead;
+it also found only **one of four** latency reference classes has enough resolved
+samples to forecast from, so the other three refuse. P4 found that **seven of
+eight** CERT-In reportable categories are not observable from outside an estate.
+
+**Next:** alerting and the TAXII server, then tenancy.
 
 **Not shipping, deliberately:** closed-forum collection, active takeover
 corroboration, version determinations from banners, multi-tenancy, and any
@@ -333,7 +367,7 @@ prediction claim the backtesting harness cannot support.
 |---|---|
 | **README.md** (this file) | what the product is, and how to run it |
 | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | how it is built: the gate, the egress boundary, the pipeline, storage, the module map, and the invariants |
-| **CLAUDE.md** | decisions D1–D19 with the reasoning and the measurements behind each |
+| **CLAUDE.md** | the decision log, with the reasoning and the measurements behind each |
 | **[docs/P2-SCOPE.md](docs/P2-SCOPE.md)** | what P2 will build, what it measured first, and the open decisions |
 | **docs/P1-BUILD-SPEC.md** | the adversarial design pass over P1, and the 86 problems it raised |
 
@@ -344,7 +378,7 @@ prediction claim the backtesting harness cannot support.
 ## 12. Contributing
 
 Read [ARCHITECTURE.md §9](docs/ARCHITECTURE.md#9-invariants-a-change-must-not-break)
-first — thirteen invariants, each with a test that fails if it is violated.
+first — nineteen invariants, each with a test that fails if it is violated.
 
 ```bash
 pip install -r requirements.txt

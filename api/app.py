@@ -15,7 +15,7 @@ but nothing here implements FR-M0-001 and nothing should pretend it does.
 from __future__ import annotations
 
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -29,6 +29,7 @@ from fastapi import FastAPI, HTTPException, Query          # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware         # noqa: E402
 from fastapi.responses import FileResponse                 # noqa: E402
 from fastapi.staticfiles import StaticFiles                # noqa: E402
+from pydantic import BaseModel                      # noqa: E402
 
 from core import engine, intel, inventory, match, scoring  # noqa: E402
 from core.overwatch import (RECONCILIATION_MEANING, load as load_overwatch,
@@ -546,6 +547,116 @@ def compliance_cert_in() -> Dict[str, Any]:
     """
     from core import cert_in as _cert_in
     return _cert_in.observability_note()
+
+
+@app.get("/api/v1/compliance/cii", tags=["compliance"])
+def compliance_cii() -> Dict[str, Any]:
+    """The CII exposure register, over assets the ORGANISATION has declared.
+
+    SKOPOS does not designate anything. Under Section 70 of the IT Act, 2000,
+    the appropriate Government declares a computer resource a protected system
+    by notification in the Official Gazette. This route reads declarations the
+    organisation recorded and adds what SKOPOS observed from outside.
+
+    Designations live in the scope store as CII-kind rules in a later slice; for
+    now the register is served empty with its authority and caveats intact, so a
+    consumer can integrate against the shape before the write path exists.
+    """
+    from core import cii as _cii
+    store = _findings_store()
+    rows = store.findings(limit=500)
+    register = _cii.build(designations=(), findings=rows)
+    payload = register.to_dict()
+    payload["note"] = (
+        "No designations are recorded yet, so every externally visible asset "
+        "appears in `undeclared_assets` as a question. That is the correct "
+        "empty state: an empty register is not an estate with no critical "
+        "infrastructure, it is an estate nobody has declared.")
+    return payload
+
+
+class _RelatedFinding(BaseModel):
+    """A finding the declarer considers related, named by asset and CVE.
+
+    Only the coordinates are accepted. The finding's BASIS is read back from the
+    store rather than taken from the request, so a caller cannot post
+    `basis: version_range` and receive a regulator-facing document describing a
+    worklist entry as a confirmed vulnerable version.
+    """
+
+    asset: str
+    cve: str
+
+
+class _DeclarationBody(BaseModel):
+    category: str
+    #: When the organisation BECAME AWARE. Must carry a timezone — a six-hour
+    #: deadline computed from an ambiguous time is worse than no deadline.
+    became_aware_at: datetime
+    declared_by: str
+    summary: str
+    organisation: str = ""
+    related: List[_RelatedFinding] = []
+
+
+@app.post("/api/v1/compliance/cert-in/draft", tags=["compliance"])
+def compliance_cert_in_draft(body: _DeclarationBody) -> Dict[str, Any]:
+    """Pre-fill a CERT-In notification from a human's incident declaration.
+
+    POST, not GET, because the input is a statement somebody makes rather than a
+    resource that exists. A Declaration is required, so there is no path from a
+    finding to this document — the determination that an incident occurred is
+    the reporter's, and this route will not make it for them.
+
+    Nothing is persisted and nothing is transmitted. The response is text for a
+    human to complete and file themselves; the judgement fields come back marked
+    rather than guessed.
+    """
+    from core import cert_in as _cert_in
+    try:
+        category = _cert_in.Category(body.category)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": f"unknown category {body.category!r}",
+                    "categories": [c.value for c in _cert_in.Category],
+                    "note": _cert_in.observability_note()["summary"]})
+
+    related: List[Dict[str, Any]] = []
+    if body.related:
+        wanted = {(r.asset, r.cve.upper()) for r in body.related}
+        rows = _findings_store().findings(limit=2000)
+        found = {(str(r.get("asset")), str(r.get("cve", "")).upper()): r
+                 for r in rows}
+        missing = sorted(f"{a}/{c}" for a, c in wanted if (a, c) not in found)
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "no such finding", "unresolved": missing,
+                        "why": "a notification must not cite a finding this "
+                               "product cannot produce evidence for"})
+        related = [found[k] for k in sorted(wanted)]
+
+    try:
+        declaration = _cert_in.Declaration(
+            category=category, became_aware_at=body.became_aware_at,
+            declared_by=body.declared_by, summary=body.summary,
+            related_findings=related)
+    except _cert_in.DeclarationInvalid as exc:
+        raise HTTPException(status_code=422, detail={"error": str(exc)})
+
+    clock = _cert_in.Clock(declaration)
+    return {
+        "draft": _cert_in.notification_draft(declaration, clock=clock,
+                                             organisation=body.organisation),
+        "filed": False,
+        "transmitted_to": None,
+        "deadline": clock.deadline.isoformat(),
+        "directive": _cert_in.DIRECTIVE,
+        "note": ("This endpoint produced text and stored nothing. SKOPOS does "
+                 "not file with CERT-In, and cannot: filing is an act by your "
+                 "organisation, through CERT-In's own channel."),
+    }
 
 
 # ---------------------------------------------------------------------------

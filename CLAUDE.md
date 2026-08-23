@@ -271,7 +271,8 @@ skopos/
 
 ## Status
 
-**P0 and P1 complete. 414 tests** (384 offline + 30 against a live PostgreSQL).
+**P0 through P4 complete. 662 tests** (632 offline + 30 against a live
+PostgreSQL).
 
 **TEPS golden-tested against SRS §9.1** — the published worked example reproduces
 exactly at 78, every intermediate factor matching (E=0.817, X=1.000, A=0.850,
@@ -284,13 +285,22 @@ capped; findings surviving a container restart; migrations applied to the runnin
 volume. Several defects in this codebase were found only by running it against
 real services — they are named in the commit messages rather than quietly fixed.
 
+### What each phase measured before it built
+
+Every one of these was a planned feature that measurement changed or killed. The
+number is in the product, not just in this file.
+
+| Phase | Measured | Consequence |
+|---|---|---|
+| P2 | 47.5% of KEV carries comparable version data (668 structured + 128 exact, 878 uncomparable) | `VERSION_RANGE` determinations ship; the coverage figure is stated on every run and in the STIX bundle caveat |
+| P3 | 0 CVE refs in ATT&CK `external_references`; a technique implicates a median of 57 groups (max 139 of 191) | The triad was closed. SSVC shipped instead |
+| P3 | 1 of 4 latency reference classes has enough resolved samples (ransomware+weaponised: n=58, median 8d, IQR 1–124); the others span 1,380–2,360 days | The forecaster refuses three of its four cells rather than interpolating |
+| P3 | Lead time on a KEV-only corpus is structurally negative (median −1258 days) | The SRS lead-time target is recorded as unmeasurable, not quietly dropped |
+| P4 | 7 of 8 CERT-In Annexure I categories are not observable from outside an estate | The clock will not start itself, and the observability note says which categories and why |
+| P4 | CII status is conferred by gazette notification under s.70 IT Act, 2000 | The register records what the organisation declared; there is no function that infers it |
+
 ### Next
 
-- [ ] NVD / cvelistV5 CNA affected ranges — the `VERSION_RANGE` determination
-      (closes D3, and is the only thing that turns a worklist into a verdict)
-- [ ] The forecast record: write every finding with its full input vector at the
-      moment it is issued, so a Brier score is possible later. History cannot be
-      backfilled — every week of delay is evidence that can never be recovered
 - [ ] Alerting, STIX 2.1 export, TAXII server
 - [ ] `Method.PARENT_ZONE`, which would unlock active takeover corroboration —
       specified in `docs/P1-BUILD-SPEC.md` §11, deferred by sponsor decision
@@ -383,6 +393,92 @@ name that most needs probing is the one that structurally cannot be verified,
 because RFC 1034 forbids a CNAME coexisting with a TXT record.
 
 **399 tests** (373 offline + 26 live-database).
+
+---
+
+## P2-P4 - decide it, forecast it, evidence it
+
+**D20 - the determination is a range comparison, and its coverage is published.**
+`VERSION_RANGE` closes D3: an observed version compared against a CNA-published
+affected range either confirms or RETIRES a finding. Measured over the full KEV
+corpus, not a sample: 47.5% determinable (668 structured ranges + 128 exact
+versions; 878 uncomparable). An earlier random-40 sample said 67.5% and was
+wrong - age-stratified, the rate runs 0% / 20% / 90% by CVE age, so a sample
+drawn without stratifying measures the sample's age distribution instead of the
+corpus. The figure is stated on every run and travels with the STIX bundle.
+
+**D21 - the ATT&CK triad was built, measured, and closed.** The intent was
+CVE -> technique -> threat group. Measured: 0 CVE references in ATT&CK
+`external_references`, and only 5 of 191 groups mention a CVE in prose. The CTID
+mapping covers 419 of 1,674 KEV entries, but resolving technique -> group
+implicates a MEDIAN OF 57 GROUPS per CVE, with a maximum of 139 of 191. An
+attribution that names 57 groups is not attribution. Closed; SSVC shipped in its
+place, because a CISA-ADP decision is a stated judgement with a named author
+rather than an inference this product would be making up.
+
+**D22 - the Crosshair counts convergence, it does not attribute.** Seven
+independent signals, a count, and three tiers (`CONVERGED_AT = 4`). It says how
+many things point at an asset, never who is pointing. The distinction is the
+whole reason the view survived D21.
+
+**D23 - the forecaster refuses three of its four cells.** Reference classes are
+(ransomware x weaponised). Measured: only ransomware+weaponised has usable data -
+n=58, median 8 days, IQR 1-124. The other three span 1,380 to 2,360 days, which
+is not a forecast, it is a shrug with a number on it. `MIN_SAMPLE = 20` and
+`MAX_USEFUL_SPREAD_DAYS = 400` are enforced in the type, so an unusable cell
+cannot be rendered as a prediction. The KEV backfill also skews the base rate -
+the unwindowed median is 777 days - so the window starts 2023-01-01 and the
+measurements behind that date are recorded in `core/artefacts.py`.
+
+**D24 - the backtest publishes what it cannot measure.** No skill score below
+`MIN_RESOLVED_TO_PUBLISH = 30` resolved forecasts. Lead time carries
+`LEAD_TIME_UNMEASURABLE`: on a KEV-only corpus every forecast is issued after the
+CVE is already known-exploited, so the median is -1258 days. The SRS lead-time
+target is therefore recorded as structurally unmeasurable here rather than
+quietly dropped. The resolver requires a genuine EPSS crossing, because 80 of 128
+forecasts were already above the threshold when issued and counting those would
+have manufactured a hit rate.
+
+**D25 - an exposure is not an incident, so the six-hour clock will not start
+itself.** There is no `clock_from_finding()` and no endpoint that opens one; the
+only constructor takes a `Declaration`, which requires a named person, a summary
+in their own words, and a timezone-aware time of AWARENESS. Measured against
+Annexure I: 7 of the 8 reportable categories are NOT_OBSERVABLE from outside an
+estate - each describes something an adversary DID. A tool that started a
+national-CERT countdown on every unpatched perimeter service would push its users
+toward over-reporting, so the reason is a published string,
+`cert_in.WHY_NOT_AUTOMATIC`, not just an absent function.
+
+**D26 - no coverage percentage against any control framework.** Eight entries,
+each naming what it contributes, what it does NOT do, and which evidence it draws
+on. A percentage would be summed and shown to a board, and the board would be
+receiving a number no external scanner has the basis to produce. The A.8.8 entry
+carries the 47.5% limit from D20 and states that this product does not patch
+anything; the A.5.7 entry carries the median-57-groups finding from D21.
+
+**D27 - SKOPOS does not designate Critical Information Infrastructure.** Under
+s.70 of the IT Act, 2000, the appropriate Government declares a computer resource
+a protected system BY NOTIFICATION IN THE OFFICIAL GAZETTE. That status cannot be
+inferred from a hostname, and an organisation acting on a guess would either
+over-report to a national agency or believe itself covered when it is not. The
+register records what the organisation stated, with the basis attached: a
+`GAZETTE` entry without a notification reference is REFUSED at construction,
+because it is the one claim here that could mislead a regulator. Assets with no
+designation are listed as a QUESTION, never as a finding - the answer may
+legitimately be that they were always out of scope.
+
+**D28 - the notification draft leaves the judgements blank.** `notification_draft`
+takes a `Declaration`, so there is no path from a finding to a regulatory
+document. It fills only what SKOPOS can substantiate and marks impact, root cause,
+data affected, remediation and contact `[TO BE COMPLETED BY REPORTER]` - a
+pre-filled guess would be filed verbatim by somebody working against a six-hour
+deadline. Related findings are cited by (asset, CVE) and their BASIS is read back
+from the store, never taken from the request, so a caller cannot post
+`basis: version_range` and receive a document describing a worklist entry as a
+confirmed vulnerable version. The route stores nothing and transmits nothing;
+filing is an act by the organisation, through CERT-In's own channel.
+
+**662 tests** (632 offline + 30 live-database).
 
 ---
 

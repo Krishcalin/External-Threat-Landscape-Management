@@ -334,13 +334,21 @@ the customer's worklist. The writer emits `obs_version`, which normalises to
 
 ## 6. Storage
 
-PostgreSQL 16. Three migrations, applied by `core/migrate.py`.
+PostgreSQL 16. Five migrations, applied by `core/migrate.py`.
 
 | Migration | Tables |
 |---|---|
 | `001_schema.sql` | `scope_rule`, `ownership_verification`, `responsible_use_ack`, `audit_log` |
 | `002_p1.sql` | `dns_run`, `dns_observation`, `takeover_finding` |
 | `003_findings.sql` | `scan_run`, `finding` |
+| `004_forecast.sql` | `forecast` — every finding's full input vector at the moment it was issued |
+| `005_forecast_null_dedupe.sql` | `UNIQUE NULLS NOT DISTINCT` on the forecast key |
+
+`005` exists because of a defect worth recording: the original constraint was
+`UNIQUE (run_id, ...)` with a nullable `run_id`, and in SQL `NULL != NULL`, so
+`ON CONFLICT DO NOTHING` silently matched nothing and every offline scan wrote a
+duplicate. `004` itself went unapplied through five scans because migrations ran
+only in `PostgresStore`; `ensure_once()` now runs in all four stores.
 
 ### Why a migration runner exists
 
@@ -481,6 +489,20 @@ resource an attacker has *already* claimed.
 | `reach.py` | outside-in reachability: `True` / `False` / `None` |
 | `dns_state.py` | change tracking |
 | `takeover.py` / `takeover_rules.py` | verdicts, mandatory evidence, provider catalogue |
+| `criticality.py` | per-asset tier from the declared environment; a controlled vocabulary |
+| `artefacts.py` | published exploit code and when — windowed from 2023-01-01, and why |
+| `ssvc.py` | CISA-ADP decisions: a stated judgement with a named author |
+| `crosshair.py` | seven signals, a count, three tiers — convergence, never attribution |
+| `latency.py` | reference classes for time-to-exploitation; refuses three of its four cells |
+| `forecast.py` / `forecast_store.py` | the input vector written at issue time, so accuracy is measurable later |
+| `backtest.py` | Brier, climatology, skill — and what it declines to publish |
+| `velocity.py` | EPSS as a series, not a reading |
+| `coverage.py` | vulnerabilities beyond the exploited catalogue, kept structurally apart |
+| `alerting.py` | what is worth interrupting somebody for, versus what is merely true |
+| `stix.py` | STIX 2.1 export that carries the worklist/determination distinction outward |
+| `cert_in.py` | the six-hour clock that will not start itself; the notification draft |
+| `controls.py` | ISO 27001:2022 + NIST CSF 2.0 — contributes / does not / evidence, no percentage |
+| `cii.py` | the CII exposure register; records declarations, designates nothing |
 
 ### `collect/` — I/O, all through one door
 
@@ -523,6 +545,17 @@ Each of these has a test that fails if it is violated.
 11. Every registered discovery source names a real operation.
 12. A takeover finding cannot exist without its evidence, or on one resolver.
 13. Truncation, refusal and degradation are always reported, never inferred.
+14. A `PRODUCT_MATCH` is never rendered as a determination — on a dashboard, in
+    a STIX bundle, or in a document addressed to a regulator.
+15. A reference class below `MIN_SAMPLE`, or wider than `MAX_USEFUL_SPREAD_DAYS`,
+    cannot be rendered as a forecast.
+16. No skill score is published below `MIN_RESOLVED_TO_PUBLISH` resolved
+    forecasts, and lead time is reported as unmeasurable, not as a number.
+17. No control mapping produces a coverage figure, in any field or any sentence.
+18. The CERT-In six-hour clock cannot be opened from a finding — only from a
+    `Declaration` carrying a named person, their own summary, and a tz-aware time.
+19. CII status is never inferred; a gazette claim without its notification
+    reference is refused at construction.
 
 ---
 
