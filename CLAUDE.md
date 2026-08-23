@@ -312,7 +312,13 @@ number is in the product, not just in this file.
       enough resolved outcomes to publish a skill score.
 - [ ] `Method.PARENT_ZONE`, which would unlock active takeover corroboration —
       specified in `docs/P1-BUILD-SPEC.md` §11, deferred by sponsor decision
-- [ ] Tenancy (FR-M0-001): org_id on every table, RLS, Postgres roles per org
+- [x] Tenancy (FR-M0-001): org_id on every table, RLS enforced by an
+      unprivileged runtime role — see D34. "Postgres roles per org" was
+      declined with a stated reason, not missed.
+- [ ] Run it against a REAL estate. Everything so far is verified against
+      `sample_data/assets.csv` — 7 assets, 64 findings. Every defect worth
+      recording in this history was found by running against something
+      real, never by reading the code.
 
 ---
 
