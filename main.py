@@ -474,6 +474,186 @@ def cmd_fingerprint(args) -> int:
     return 0
 
 
+def _read_names(path):
+    import csv
+    with open(path, encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    names = [str(r.get("identifier") or r.get("hostname") or "").strip()
+             for r in rows]
+    return [n for n in names if n and not n.startswith("*.")]
+
+
+def cmd_dns_sweep(args) -> int:
+    """Resolve every name across several resolvers, and record what changed."""
+    from collect import dns_records, takeover_scan
+    from collect.dns_wire import RRType
+    from core import dns_state
+    from core.dns_store import open_dns_store
+
+    store = _store()
+    dns = open_dns_store()
+    scope = store.load_scope()
+    names = _read_names(args.inventory)
+    if not names:
+        print(f"error: no identifier/hostname column in {args.inventory}",
+              file=sys.stderr)
+        return 1
+
+    resolvers = (tuple(args.resolvers.split(","))
+                 if args.resolvers else dns_records.DEFAULT_RESOLVERS)
+
+    if args.plan:
+        would, refusals = gate.plan(names, dns_records.OPERATION, args.actor,
+                                    scope, {n: None for n in names},
+                                    kind=ScopeKind.DOMAIN)
+        print(f"Would resolve {len(would)} of {len(names)} name(s) across "
+              f"{len(resolvers)} resolver(s)")
+        if refusals:
+            print(f"\n{len(refusals)} refused:")
+            for line in refusals[:15]:
+                print(f"  {line[:140]}")
+        print("\nNothing was contacted.")
+        return 0
+
+    run_id = dns.start_run(args.actor, resolvers)
+    store.append_audit(args.actor, "dns.sweep.started",
+                       {"run": run_id, "names": len(names),
+                        "resolvers": list(resolvers)})
+
+    sweep = dns_records.sweep(names, args.actor, scope, resolvers=resolvers)
+    dns.finish_run(run_id, sweep)
+
+    previous = dns.latest_observations()
+    report = dns_state.diff(sweep, previous)
+
+    print(sweep.note())
+    print()
+    print(report.headline())
+
+    conclusive = [c.after for c in report.changes if c.after is not None]
+    dns.record_observations(run_id, conclusive)
+
+    interesting = [c for c in report.changes
+                   if c.kind in (dns_state.ChangeKind.APPEARED,
+                                 dns_state.ChangeKind.DISAPPEARED,
+                                 dns_state.ChangeKind.MODIFIED)]
+    if interesting:
+        print()
+        for change in interesting[:20]:
+            print(f"  {change.explain()[:160]}")
+        if len(interesting) > 20:
+            print(f"  ... {len(interesting) - 20} more "
+                  f"(etlm dns-changes --limit {len(interesting)})")
+
+    # Takeover is a STATE judgement and runs fully on the first sweep — a
+    # dangling CNAME is dangerous the first time you look at it.
+    #
+    # The CNAME TARGETS must be resolved too. The sweep above only resolved the
+    # input names, so without this second pass every target is unknown and the
+    # assessment concludes nothing at all — measured, it reported 7 records it
+    # "could not take further" when it had simply never looked them up.
+    #
+    # Targets are resolved WITHOUT a scope check on the target itself, because a
+    # CNAME target is by definition somebody else's name and would never be in
+    # the customer's scope. This is a PASSIVE recursive lookup through a
+    # third-party resolver — the same operation already authorised for the name
+    # that points at it — and it emits nothing toward the target's own
+    # infrastructure.
+    targets = sorted({a.winning.values[0] for a in sweep.agreements
+                      if a.rrtype is RRType.CNAME and a.agreed
+                      and a.winning.values})
+    lookup = {a.name: a for a in sweep.agreements if a.rrtype is RRType.A}
+    if targets:
+        target_sweep = dns_records.sweep(
+            targets, args.actor, scope, rrtypes=(RRType.A,),
+            resolvers=resolvers, permit_override=True)
+        lookup.update({a.name: a for a in target_sweep.agreements})
+
+    def resolve_target(target):
+        return lookup.get(target)
+
+    rdap_permit = None
+    try:
+        rdap_permit = gate.authorise(args.domain_for_rdap or names[0],
+                                     takeover_scan.RDAP_OPERATION, args.actor,
+                                     scope, kind=ScopeKind.DOMAIN)
+    except PermissionError:
+        rdap_permit = None      # RDAP corroboration unavailable; stated below
+
+    takeover = takeover_scan.assess(sweep, args.actor, scope, resolve_target,
+                                    permit_for_rdap=rdap_permit)
+    dns.record_findings(run_id, takeover.findings)
+    store.append_audit(args.actor, "dns.sweep.completed",
+                       {"run": run_id, "attempted": sweep.attempted,
+                        "observed": sweep.observed,
+                        "quorum_failed": sweep.quorum_failed,
+                        "unobserved": sweep.unobserved,
+                        "refused": len(sweep.refusals),
+                        "takeover_findings": len(takeover.findings)})
+
+    print()
+    print(takeover.note())
+    for finding in takeover.findings[:10]:
+        print(f"  {finding.verdict.value.upper()}  {finding.evidence.name} -> "
+              f"{finding.evidence.target}")
+        for reason in finding.reasons:
+            print(f"      {reason[:130]}")
+    if rdap_permit is None and takeover.assessed:
+        print("  (RDAP corroboration was unavailable, so no unregistered-domain "
+              "verdict could be reached this run.)")
+    return 0
+
+
+def cmd_dns_changes(args) -> int:
+    from core.dns_store import open_dns_store
+    dns = open_dns_store()
+    runs = dns.runs(args.limit)
+    if not runs:
+        print("No DNS sweep has been run.")
+        return 0
+    print(f"{'run':>4}  {'started':20} {'attempted':>9} {'observed':>8} "
+          f"{'no-quorum':>9} {'unobserved':>10} {'refused':>7}")
+    for run in runs:
+        print(f"{run['id']:>4}  {run['started_at'][:19]:20} "
+              f"{run['attempted']:>9} {run['observed']:>8} "
+              f"{run['quorum_failed']:>9} {run['unobserved']:>10} "
+              f"{run['refused']:>7}"
+              + ("  DEGRADED" if run["degraded"] else ""))
+    return 0
+
+
+def cmd_takeover(args) -> int:
+    import json as _json
+
+    from core.dns_store import open_dns_store
+    from core.takeover import TAKEOVER_MEANING
+
+    dns = open_dns_store()
+    rows = dns.findings(args.limit)
+    if args.json:
+        print(_json.dumps({"findings": rows, "meaning": TAKEOVER_MEANING},
+                          indent=1))
+        return 0
+    if not rows:
+        print("No takeover findings. That is not the same as no dangling "
+              "records — run `dns-sweep` first, and read what it says it could "
+              "not assess.")
+        return 0
+    for row in rows:
+        print(f"{row['verdict'].upper()}  {row['name']} -> {row['target']}")
+        for reason in row["reasons"]:
+            print(f"    {reason[:140]}")
+        print(f"    evidence: {row['target_rcode']} from "
+              f"{row['resolvers_agreeing']} resolver(s); first seen "
+              f"{row['first_seen']}")
+        print()
+    print(f"{len(rows)} finding(s).")
+    print("\nThere is no 'vulnerable' verdict, in this phase or any later one. "
+          "The only experiment that would confirm one is registering the "
+          "resource, which this product refuses to do.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="etlm", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -567,6 +747,30 @@ def build_parser() -> argparse.ArgumentParser:
     fp.add_argument("--dry-run", action="store_true",
                     help="show what would be probed, contacting nothing")
     fp.set_defaults(fn=cmd_fingerprint)
+
+    # -- DNS ---------------------------------------------------------------
+    sweep_cmd = sub.add_parser(
+        "dns-sweep",
+        help="resolve names across several resolvers; track change and takeover")
+    sweep_cmd.add_argument("inventory", help="a CSV carrying identifier/hostname")
+    sweep_cmd.add_argument("--actor", required=True, help=f"({ACTOR_NOTE})")
+    sweep_cmd.add_argument("--resolvers", default=None,
+                           help="comma-separated; defaults to three public "
+                                "third-party resolvers, never the customer's")
+    sweep_cmd.add_argument("--domain-for-rdap", default=None,
+                           help="apex to authorise RDAP corroboration against")
+    sweep_cmd.add_argument("--plan", action="store_true",
+                           help="show what would be resolved, contacting nothing")
+    sweep_cmd.set_defaults(fn=cmd_dns_sweep)
+
+    changes = sub.add_parser("dns-runs", help="past sweeps and their coverage")
+    changes.add_argument("--limit", type=int, default=20)
+    changes.set_defaults(fn=cmd_dns_changes)
+
+    take = sub.add_parser("takeover", help="dangling records, and how far we got")
+    take.add_argument("--limit", type=int, default=50)
+    take.add_argument("--json", action="store_true")
+    take.set_defaults(fn=cmd_takeover)
     return parser
 
 

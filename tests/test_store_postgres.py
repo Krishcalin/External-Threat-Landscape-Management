@@ -205,8 +205,12 @@ def test_an_existing_volume_is_adopted_rather_than_rebuilt():
                 "SELECT to_regclass('public.schema_migration')").fetchone()[0] is None
 
         applied = migrate.ensure_current(dsn)
-        assert applied == [], "001 must be back-filled, not re-executed"
-        assert migrate.applied(dsn) == ["001"]
+        assert "001" not in applied, "001 must be back-filled, not re-executed"
+        # Later migrations DO run — that is the whole point of adopting the
+        # volume rather than refusing it.
+        later = [v for v, _ in migrate.available() if v != "001"]
+        assert applied == later
+        assert migrate.applied(dsn) == sorted(["001"] + later)
     finally:
         with psycopg.connect(ADMIN_DSN, autocommit=True) as admin:
             admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
