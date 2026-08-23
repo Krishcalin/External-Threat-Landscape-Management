@@ -60,6 +60,10 @@ class RRType(enum.IntEnum):
     MX = 15
     TXT = 16
     AAAA = 28
+    #: RFC 8659. Constrains which CAs may issue for a name — a posture signal a
+    #: domain publishes deliberately, and one of the few readable without
+    #: touching the host.
+    CAA = 257
 
 
 #: What a sweep asks for. CNAME first because takeover detection depends on it.
@@ -247,6 +251,13 @@ def _render(data: bytes, offset: int, rtype: int, rdata: bytes) -> Optional[str]
     if rtype == RRType.MX and len(rdata) >= 3:
         rendered, _ = _read_name(data, offset + 2)
         return rendered
+    if rtype == RRType.CAA and len(rdata) >= 2:
+        # RFC 8659 §4.1: flags(1) | tag length(1) | tag | value. The value is
+        # not length-prefixed — it runs to the end of the rdata.
+        tag_length = rdata[1]
+        tag = rdata[2:2 + tag_length].decode("ascii", "replace")
+        value = rdata[2 + tag_length:].decode("utf-8", "replace").strip('"')
+        return f"{tag} {value}" if tag else None
     if rtype == RRType.TXT:
         parts, index = [], 0
         while index < len(rdata):
