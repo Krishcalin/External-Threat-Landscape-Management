@@ -48,7 +48,7 @@ shapes of version data:
 
 So W1 is not "build the determination tier". It is "feed the one that exists".
 
-### How much of KEV carries usable version data — corrected
+### How much of KEV carries usable version data — 47.5%, measured in full
 
 **This section originally claimed ≈67.5% and that figure was not safe to
 publish.** It came from a single 40-CVE random sample, and a second measurement
@@ -77,9 +77,16 @@ Weighted by KEV's actual age distribution — ≤2015 11.9%, 2016–17 8.7%,
 2018–21 33.9%, 2022–23 17.6%, 2024+ 27.9% — measurement 2 implies roughly
 **41%**, not 67.5%.
 
-**Neither number is trustworthy at n=20–40**, and the honest position is that
-the headline share is **pending the full 1,674-CVE corpus**, which is being
-fetched. What the two measurements agree on, and what actually matters for
+**RESOLVED — the full corpus settles it at 47.5%.** All 1,674 CVEs fetched, zero
+failures: 668 structured ranges + 128 exact versions = 796 determinable, 878
+uncomparable.
+
+So the random sample (67.5%) was badly high and the age-weighted estimate (41%)
+was slightly low. The sample's biggest error was `exact versions`: it suggested
+37.5%, and the true figure is 7.6%. Stratifying was the more reliable method
+even though neither was right.
+
+What the measurements agreed on all along, and what actually matters for
 scoping, is the *shape*:
 
 > **The determination tier's value is strongly age-dependent.** An estate
