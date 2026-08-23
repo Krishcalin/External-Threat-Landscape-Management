@@ -1,5 +1,6 @@
-import type { CrosshairView, DnsRunsPage, FindingsPage, IntelStatus,
-              LatencyReport, Summary } from './types'
+import type { Accuracy, AlertsView, CertInStatus, CiiRegister,
+              ControlMapping, CrosshairView, DnsRunsPage, FindingsPage,
+              IntelStatus, LatencyReport, Summary, Tenancy } from './types'
 
 /** Relative paths only: the built bundle carries no origin, so it can be served
  *  by the API itself in a deployment and proxied in development. */
@@ -52,3 +53,21 @@ export const crosshair = () => get<CrosshairView>('/crosshair?limit=200')
  *  behind it measures a population, not an estate. The per-CVE route exists for
  *  an operator asking about one CVE on purpose. */
 export const latency = () => get<LatencyReport>('/latency')
+
+/* ── compliance ───────────────────────────────────────────────────────────── */
+export const ciiRegister = () => get<CiiRegister>('/compliance/cii')
+export const certIn = () => get<CertInStatus>('/compliance/cert-in')
+export const controls = () => get<ControlMapping>('/compliance/controls')
+
+/* ── accuracy, alerts, tenancy ────────────────────────────────────────────── */
+export const accuracy = () => get<Accuracy>('/accuracy')
+export const alerts = () => get<AlertsView>('/alerts')
+export const tenancy = () => get<Tenancy>('/tenancy')
+
+/** Deliberately absent: a `certInDraft()` call.
+ *
+ *  The draft endpoint is a POST that takes a Declaration — a named person
+ *  stating they became aware of an incident, in their own words. A console
+ *  button that produced a regulator-facing document from a finding would be
+ *  exactly the path `core/cert_in.py` refuses to provide. Whoever files makes
+ *  that determination first, and they do it deliberately. */

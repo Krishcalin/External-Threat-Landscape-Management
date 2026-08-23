@@ -1,30 +1,58 @@
 import { useEffect, useState } from 'react'
-import { ApiError, crosshair as fetchCrosshair, latency as fetchLatency,
+import { accuracy as fetchAccuracy, alerts as fetchAlerts,
+         ApiError, certIn as fetchCertIn, ciiRegister as fetchCii,
+         controls as fetchControls, crosshair as fetchCrosshair,
+         latency as fetchLatency,
          dnsRuns as fetchDnsRuns, findings as fetchFindings,
          intel as fetchIntel, reconciliationGuide,
-         summary as fetchSummary } from './api/client'
-import type { CrosshairView, DnsRun, Finding, IntelStatus, LatencyReport,
+         summary as fetchSummary, tenancy as fetchTenancy } from './api/client'
+import type { Accuracy, AlertsView, CertInStatus, CiiRegister, ControlMapping,
+              CrosshairView, DnsRun, Finding, IntelStatus, LatencyReport,
               ReconciliationOutcome,
-              Summary } from './api/types'
+              Summary, Tenancy } from './api/types'
+import { AccuracyPanel } from './components/AccuracyPanel'
+import { AlertsPanel } from './components/AlertsPanel'
+import { CompliancePanel } from './components/CompliancePanel'
 import { CoveragePanel } from './components/CoveragePanel'
 import { CrosshairPanel } from './components/CrosshairPanel'
+import { SystemPanel } from './components/SystemPanel'
 import { TepsBar } from './components/TepsBar'
 
 /**
  * The SKOPOS console.
  *
- * ONE SCREEN, DELIBERATELY. The SRS specifies Executive, Management and
- * Operations projections of one graph. Shipping three half-built views would
- * make the product look broader and be worse; this is the Management view — the
- * prioritised backlog with its evidence — because it is the one that has an
- * engine behind it today. The other two arrive when they have something to
- * project.
+ * SIX SECTIONS, ON THE CONDITION THIS FILE ORIGINALLY SET. It shipped as one
+ * screen with a note saying the other views would arrive "when they have
+ * something to project", because shipping half-built views makes a product look
+ * broader and be worse. They now have engines: compliance, forecast accuracy,
+ * the alert decision and the tenancy posture were all built and reachable only
+ * by curl. Worklist stays the default because it is what somebody opens the
+ * console to do.
+ *
+ * The Executive and Operations projections in the SRS are still absent, and for
+ * the original reason — nothing has been built that would project differently
+ * for those audiences, and a re-skinned Management view with fewer columns is
+ * not an executive view.
  *
  * WHAT THIS SCREEN REFUSES TO DO. It never shows a finding count without also
  * showing what was not assessed, and it never shows a TEPS without its
  * decomposition being one click away. Those two rules are the difference between
  * a console and a dashboard.
  */
+
+type Section = 'worklist' | 'crosshair' | 'compliance' | 'accuracy'
+  | 'alerts' | 'system'
+
+/** Worklist first because it is what somebody opens the console to do; System
+ *  last because it answers a question asked once per deployment. */
+const SECTIONS: { id: Section; label: string }[] = [
+  { id: 'worklist', label: 'Worklist' },
+  { id: 'crosshair', label: 'Crosshair' },
+  { id: 'alerts', label: 'Alerts' },
+  { id: 'compliance', label: 'Compliance' },
+  { id: 'accuracy', label: 'Accuracy' },
+  { id: 'system', label: 'This instance' },
+]
 
 const RECON_TONE: Record<ReconciliationOutcome, string> = {
   unexplained_exposure: 'banner-crit',
@@ -154,6 +182,13 @@ export function App() {
   const [dnsRun, setDnsRun] = useState<DnsRun | null>(null)
   const [crosshair, setCrosshair] = useState<CrosshairView | null>(null)
   const [latency, setLatency] = useState<LatencyReport | null>(null)
+  const [section, setSection] = useState<Section>('worklist')
+  const [cii, setCii] = useState<CiiRegister | null>(null)
+  const [certin, setCertin] = useState<CertInStatus | null>(null)
+  const [controls, setControls] = useState<ControlMapping | null>(null)
+  const [accuracy, setAccuracy] = useState<Accuracy | null>(null)
+  const [alerts, setAlerts] = useState<AlertsView | null>(null)
+  const [tenancy, setTenancy] = useState<Tenancy | null>(null)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -177,6 +212,21 @@ export function App() {
     // 503 when no artefact index is vendored. The base rate simply does not
     // render then — an absent measurement must not become a blank number.
     fetchLatency().then(setLatency).catch(() => setLatency(null))
+
+    // Every one of these is fetched up front rather than on tab activation.
+    // The payloads are small, and a section that loads only when opened cannot
+    // put a count on its own tab — which is how somebody would miss an alert
+    // they never clicked through to.
+    //
+    // Each failure sets null rather than surfacing an error: a section that
+    // could not load says so in its own words, and a page-level error banner
+    // for one absent panel would suggest the whole console is broken.
+    fetchCii().then(setCii).catch(() => setCii(null))
+    fetchCertIn().then(setCertin).catch(() => setCertin(null))
+    fetchControls().then(setControls).catch(() => setControls(null))
+    fetchAccuracy().then(setAccuracy).catch(() => setAccuracy(null))
+    fetchAlerts().then(setAlerts).catch(() => setAlerts(null))
+    fetchTenancy().then(setTenancy).catch(() => setTenancy(null))
   }, [])
 
   const unexplained = summary?.reconciliation?.unexplained_exposure ?? 0
@@ -215,11 +265,47 @@ export function App() {
         </button>
       </header>
 
-      <main className="main stack">
+      <nav className="tabs" role="tablist" aria-label="Console sections">
+        {SECTIONS.map(({ id, label }) => (
+          <button
+            key={id}
+            role="tab"
+            id={`tab-${id}`}
+            aria-selected={section === id}
+            aria-controls={`panel-${id}`}
+            className="tab"
+            onClick={() => setSection(id)}
+          >
+            {label}
+            {/* Only where the number is something to act on. A count on every
+                tab is decoration, and decoration next to a real count makes the
+                real one easier to skip. */}
+            {id === 'alerts' && alerts && alerts.alerts.length > 0 && (
+              <span className="tab-count">{alerts.alerts.length}</span>
+            )}
+          </button>
+        ))}
+      </nav>
+
+      <main className="main stack" role="tabpanel"
+            id={`panel-${section}`} aria-labelledby={`tab-${section}`}>
         {error && <div className="banner banner-crit" role="alert">{error}</div>}
 
-        <CrosshairPanel view={crosshair} latency={latency} />
+        {section === 'crosshair' && (
+          <CrosshairPanel view={crosshair} latency={latency} />
+        )}
 
+        {section === 'compliance' && (
+          <CompliancePanel cii={cii} certin={certin} controls={controls} />
+        )}
+
+        {section === 'accuracy' && <AccuracyPanel accuracy={accuracy} />}
+
+        {section === 'alerts' && <AlertsPanel view={alerts} />}
+
+        {section === 'system' && <SystemPanel tenancy={tenancy} intel={intel} />}
+
+        {section === 'worklist' && <>
         <CoveragePanel run={dnsRun} />
 
         {!summary && !error && (
@@ -334,6 +420,7 @@ export function App() {
             </p>
           )}
         </div>
+        </>}
       </main>
     </div>
   )

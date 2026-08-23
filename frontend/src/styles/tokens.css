@@ -268,3 +268,66 @@ tbody tr:hover { background: var(--panel2); }
 @media (max-width: 640px) {
   .brandmark { height: 34px; }
 }
+
+/* ── classes the panels already used and nobody had defined ────────────────
+   `.chip`, `.gap-list`, `.num` and `.lede` are referenced by CrosshairPanel and
+   CoveragePanel and were never written, so those elements have been rendering
+   as unstyled defaults. Found by grepping the stylesheet for every class the
+   components name — worth doing after any panel is added, because a missing
+   rule degrades silently and looks like a spacing opinion. */
+
+.chip {
+  display: inline-block; padding: 2px 8px; border-radius: var(--radius-sm);
+  font-size: 11px; font-weight: 600; letter-spacing: .01em;
+  color: var(--ink2); background: var(--panel2);
+  border: 1px solid var(--line); white-space: nowrap;
+}
+.chip + .chip { margin-left: 4px; }
+
+/* Right-aligned and tabular so digits line up down a column and a reader can
+   compare magnitudes without reading every figure. */
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.lede { font-size: 15px; color: var(--ink); margin: var(--space-3) 0; }
+
+.gap-list { list-style: none; margin: var(--space-2) 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--space-1); }
+.gap-list li { display: flex; align-items: baseline; gap: var(--space-2); }
+.gap-count { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 2.5em; }
+.gap-why { color: var(--ink2); }
+
+/* ── section navigation ────────────────────────────────────────────────────
+   Six sections rather than one scrolling page. The console shipped as a single
+   view because only one had an engine behind it; the others now do.
+
+   Buttons in a tablist, not links: there is no router here and inventing URL
+   state would mean a second source of truth for which panel is open. Roving
+   `aria-selected` and `aria-controls` carry the semantics a link would have
+   given for free. */
+.tabs {
+  display: flex; gap: var(--space-1); flex-wrap: wrap;
+  padding: 0 var(--space-5); background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  position: sticky; top: 71px; z-index: 9;
+}
+.tab {
+  font: inherit; font-size: 13px; font-weight: 600;
+  padding: var(--space-3) var(--space-4);
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--ink3); cursor: pointer; white-space: nowrap;
+  margin-bottom: -1px;
+}
+.tab:hover { color: var(--ink); }
+.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+/* A count on a tab is a claim about the data behind it, so it only appears
+   where the number means something a reader should act on. */
+.tab-count {
+  display: inline-block; margin-left: 6px; padding: 0 6px;
+  border-radius: 999px; font-size: 11px; font-weight: 700;
+  background: var(--critbg); color: var(--crit);
+  border: 1px solid color-mix(in srgb, var(--crit) 30%, transparent);
+}
+
+@media (max-width: 720px) {
+  .tabs { top: 61px; padding: 0 var(--space-3); overflow-x: auto; }
+}

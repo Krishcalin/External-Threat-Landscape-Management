@@ -35,3 +35,6 @@ reports/
 # The intelligence corpus is a VERSIONED INPUT, not a build artefact — a scan
 # records which catalogue version answered it, and that is only reproducible if
 # the corpus is in the repository. See tools/refresh_intel.py.
+
+# Output of frontend/scripts/render-check.tsx
+frontend/.render-check/

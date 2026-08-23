@@ -301,9 +301,15 @@ number is in the product, not just in this file.
 
 ### Next
 
-Nothing outstanding on the roadmap. TAXII, alert delivery and tenancy all
-shipped; what remains is operational — running the scheduler continuously so
-forecasts accumulate enough resolved outcomes to publish a skill score.
+- [ ] Tenancy's last mile, IF the deployment model calls for it: per-request
+      org resolution needs an auth model (token -> org), and org lifecycle needs
+      a surface. Today `tenancy.using()` exists and nothing calls it, so every
+      request resolves to `SKOPOS_ORG_ID` — one organisation per deployment,
+      with the enforcement floor underneath it. That is the right shape for
+      one-instance-per-customer and the wrong one for SaaS; the question is the
+      deployment model, not the code.
+- [ ] Operational: run the scheduler continuously so forecasts accumulate
+      enough resolved outcomes to publish a skill score.
 - [ ] `Method.PARENT_ZONE`, which would unlock active takeover corroboration —
       specified in `docs/P1-BUILD-SPEC.md` §11, deferred by sponsor decision
 - [ ] Tenancy (FR-M0-001): org_id on every table, RLS, Postgres roles per org
@@ -597,6 +603,42 @@ name so tests use a throwaway.
 **767 tests** (704 offline + 63 live-database).
 
 ---
+
+**D35 - the console grew to six sections on the condition it set itself.**
+`App.tsx` shipped as one screen with a note saying the other SRS views arrive
+"when they have something to project", because half-built views make a product
+look broader and be worse. Measured: 24 API routes, 3 panels, and every surface
+from P3 onward reachable only by curl — the compliance pack, the accuracy
+scoreboard, the alert decision and the tenancy posture. Those have engines now,
+so they got screens. The Executive and Operations projections are still absent
+for the original reason: a re-skinned Management view with fewer columns is not
+an executive view.
+
+The panels carry the refusals as CONTENT rather than footnotes, because that is
+the whole reason these screens differ from a competitor's. Seven of eight
+CERT-In categories render as "cannot observe" in the same table as the one that
+can; the CII register leads with "SKOPOS does not designate"; every control
+shows what it does NOT do beside what it contributes, with no coverage
+percentage anywhere; and the accuracy panel shows "not published" where a Brier
+score would go, because a provisional figure gets screenshotted and the asterisk
+does not travel with it. There is no button that files a CERT-In notification,
+no button that sends an alert, and no button that downloads the STIX bundle —
+each would be a path the module behind it deliberately refuses to provide.
+
+**D36 - a type-check is not a render.** `npm run build` passed while two panels
+had never executed. `tsc` proves shapes agree with the declarations; it does not
+prove a `.map` over a field the API returns as null will not throw on a live
+page. `frontend/scripts/render-check.tsx` server-renders every panel against the
+RUNNING API and fails if one throws.
+
+Its first version was worse than useless: a failed fetch became `null`, `null`
+is a legitimate state every panel renders as an empty state, and the check
+reported "ok" for eleven panels while two of them had quietly rendered "no scan
+on record" against a still-warming container. It now fails loudly on any
+non-200. Two other things the sweep caught: `.chip`, `.gap-list`, `.num` and
+`.lede` were referenced by the existing Crosshair and Coverage panels and had
+never been written, so those elements had been rendering as unstyled defaults;
+and the `IntelStatus` type was two fields behind the API it describes.
 
 ## Running it
 

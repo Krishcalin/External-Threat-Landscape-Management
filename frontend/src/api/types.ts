@@ -28,6 +28,12 @@ export interface IntelStatus {
   entries: number
   epss_scope: string
   ransomware_linked: number
+  /** Whether the corpus carries CNA affected ranges at all. */
+  affected_ranges?: boolean
+  /** The share of the catalogue whose versions can actually be compared —
+   *  measured over the full corpus, not a sample. Everything outside it can
+   *  only ever be a worklist entry, however it is presented. */
+  determinable_share?: number | null
 }
 
 export interface Factors {
@@ -201,4 +207,131 @@ export interface LatencyReport {
   not_a_forecast: string
   artefact_coverage: number | null
   coverage_meaning: string | null
+}
+
+/* ── compliance ───────────────────────────────────────────────────────────
+ * Every one of these carries a REFUSAL as a first-class field rather than a
+ * footnote, because the refusals are what the panels are mostly for. */
+
+export interface CiiEntry {
+  asset: string
+  sector_label: string
+  basis: string
+  basis_meaning: string
+  gazette_reference: string | null
+  declared_by: string | null
+  declared_on: string | null
+  findings: number
+  determinations: number
+  worklist: number
+  first_observed_by_skopos: string | null
+  externally_reachable: boolean | null
+  note: string | null
+}
+
+export interface CiiRegister {
+  authority: string
+  cii_definition: string
+  reviewed_on: string
+  headline: string
+  entries: CiiEntry[]
+  undeclared_assets: string[]
+  sectors: Record<string, string>
+  /** SKOPOS does not and cannot determine CII status. Rendered, not hidden. */
+  skopos_does_not_designate: string
+  note?: string
+}
+
+export interface CertInCategory {
+  category: string
+  label: string
+  skopos_can_observe: boolean
+  note: string
+}
+
+export interface CertInStatus {
+  directive: string
+  reviewed_on: string
+  window_hours: number
+  /** Why no finding starts a six-hour countdown. */
+  why_not_automatic: string
+  categories: CertInCategory[]
+  summary: string
+}
+
+export interface Control {
+  framework: string
+  id: string
+  title: string
+  contributes: string
+  /** The half that makes the mapping honest. Never collapsed into a tooltip. */
+  does_not: string
+  evidence_from: string[]
+}
+
+export interface ControlMapping {
+  reviewed_on: string
+  disclaimer: string
+  controls: Control[]
+  frameworks: string[]
+}
+
+/* ── accuracy ─────────────────────────────────────────────────────────────── */
+export interface CalibrationBucket {
+  band: string
+  forecast: number
+  observed: number | null
+  n: number
+}
+
+export interface Accuracy {
+  model_version: string
+  issued: number
+  resolved: number
+  /** False until enough forecasts resolve. No figure is shown before then. */
+  publishable: boolean
+  minimum_to_publish: number
+  brier: number | null
+  climatology_brier: number | null
+  uninformative_brier: number
+  base_rate: number | null
+  skill_vs_climatology: number | null
+  outcomes: Record<string, number>
+  calibration: CalibrationBucket[]
+  /** Structurally unmeasurable on a KEV-only corpus. Says so in words. */
+  lead_time: string
+  headline: string
+}
+
+/* ── alerts ───────────────────────────────────────────────────────────────── */
+export interface AlertRow {
+  trigger: string
+  subject: string
+  body: string
+  detail: Record<string, unknown>
+  at: string
+}
+
+export interface AlertsView {
+  previous_run: number | null
+  is_baseline: boolean
+  alerts: AlertRow[]
+  suppressed_below_band: number
+  suppressed_by_cap: number
+  minimum_band: string
+  note: string
+  /** Always false from this route: it decides, it does not deliver. */
+  delivered: boolean
+  delivery: string
+  triggers_off_by_default: string[]
+}
+
+/* ── tenancy ──────────────────────────────────────────────────────────────── */
+export interface Tenancy {
+  org: string
+  /** States its own limit: a defence against a bug, not against a compromise. */
+  isolation_meaning: string
+  /** Whether RLS actually applies, or the app is connected as a superuser. */
+  enforcement: string
+  bound_org: string | null
 }

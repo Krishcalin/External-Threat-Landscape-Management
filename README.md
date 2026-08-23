@@ -358,10 +358,20 @@ it also found only **one of four** latency reference classes has enough resolved
 samples to forecast from, so the other three refuse. P4 found that **seven of
 eight** CERT-In reportable categories are not observable from outside an estate.
 
-**Next:** nothing on the roadmap. The remaining items — a TAXII 2.1 server,
-alert delivery from a scan run, and tenancy — all shipped.
+**The console** has six sections — Worklist, Crosshair, Alerts, Compliance,
+Accuracy, and This instance — served at `/` by the same container as the API.
+Everything the engines produce is now reachable without curl.
 
-**Tenancy, and what it is honestly worth.** Rows carry an `org_id` and
+**Next:** the last mile of tenancy, if the deployment model calls for it (see
+below), plus whatever running this in anger turns up.
+
+**Tenancy serves one organisation per deployment today.** The enforcement is
+built and proven; the last mile is not. Every request resolves to
+`SKOPOS_ORG_ID`, there is no per-request tenant resolution, and an organisation
+can only be created by hand in the database. What that buys is a hard floor
+under a single-tenant install — not multi-tenant SaaS.
+
+**What the enforcement is honestly worth.** Rows carry an `org_id` and
 PostgreSQL row-level security filters every query against a session variable
 the application sets per connection. The load-bearing part is not the policies:
 the application now connects as an **unprivileged role that owns nothing and
