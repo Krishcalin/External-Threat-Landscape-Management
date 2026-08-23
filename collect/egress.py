@@ -102,6 +102,11 @@ ALLOWED_HTTP_HOSTS: frozenset = frozenset({
     # a query the operator supplied. Being listed here grants reachability, not
     # a credential.
     "api.shodan.io", "www.virustotal.com", "haveibeenpwned.com",
+    # Shodan's own keyless endpoint. Reachable without a credential, which is
+    # why it carries an ACKNOWLEDGEMENT instead — see collect/internetdb.py. On
+    # this list it is merely reachable; `acknowledged()` decides whether it is
+    # ever called.
+    "internetdb.shodan.io",
 })
 
 #: Third-party recursive resolvers. Not the customer's.

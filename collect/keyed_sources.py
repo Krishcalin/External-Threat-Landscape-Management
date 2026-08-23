@@ -358,11 +358,28 @@ def consult_for_target(permit_for, target, budget=None,
     """
     from core.lookup import Kind
 
+    # Imported here rather than at module scope: `internetdb` imports
+    # `SourceAnswer` from this module, and a top-level import would be a cycle.
+    from collect import internetdb
+
     answers: List[SourceAnswer] = []
     if target.kind in (Kind.ADDRESS, Kind.BLOCK):
         for address in list(target.addresses)[:8]:
-            answers.append(shodan_host(permit_for(OPERATION), address,
-                                       budget, limiter))
+            # PAID SHODAN FIRST, falling through only when it is unavailable.
+            # An operator who has paid for banners and continuous indexing
+            # should receive them; InternetDB is the same crawl up to a week old
+            # with no banners, so preferring it would quietly downgrade a paying
+            # deployment.
+            #
+            # The test is `available`, not `answered`. A key that exists and
+            # errored is a failure worth reporting, not a reason to silently ask
+            # somebody else and present the substitute's answer as the first
+            # one's.
+            answer = shodan_host(permit_for(OPERATION), address, budget, limiter)
+            answers.append(answer)
+            if not answer.available:
+                answers.append(internetdb.host(permit_for(OPERATION), address,
+                                               budget, limiter))
     else:
         answers.append(virustotal_domain(permit_for(OPERATION), target.value,
                                          budget, limiter))

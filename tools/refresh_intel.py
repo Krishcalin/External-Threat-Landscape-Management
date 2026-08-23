@@ -51,7 +51,7 @@ from datetime import datetime, timezone
 import time
 from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, Iterable
+from typing import Dict, Iterable, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.affected import affected_products, parse_version  # noqa: E402
@@ -382,6 +382,129 @@ def fetch_artefacts(only: Iterable[str] | None = None) -> Dict:
     return {"sources": reports, "artefacts": artefacts}
 
 
+def fetch_blocklists() -> Dict:
+    """Vendor the keyless abuse feeds into one corpus.
+
+    ONE FAILING PUBLISHER MUST NOT EMPTY THE CORPUS. Each feed is fetched
+    independently and a failure is recorded as a failure — the previous entries
+    for that feed are carried forward from the existing corpus where one exists,
+    and the reason is written into the file. The alternative is a refresh that
+    "succeeds" with a feed silently missing, after which every lookup against it
+    reports no hits and reads as clean.
+    """
+    from core import blocklists as bl
+
+    previous: Dict = {}
+    existing = DATA / "blocklists.json"
+    if existing.exists():
+        try:
+            previous = (json.loads(existing.read_text(encoding="utf-8"))
+                        .get("feeds") or {})
+        except (OSError, ValueError):
+            previous = {}
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    feeds: Dict[str, Dict] = {}
+    for feed in bl.FEEDS:
+        try:
+            raw = _get(feed.url).decode("utf-8", "replace")
+            entries = _parse_feed(feed, raw)
+            if not entries:
+                # A publisher that still answers 200 with an empty or
+                # deprecated list. abuse.ch's SSLBL does exactly this — see
+                # core.blocklists.REJECTED.
+                raise ValueError("parsed to zero entries")
+            published = _publisher_date(raw)
+            feeds[feed.name] = {
+                "url": feed.url, "kind": feed.kind, "sense": feed.sense,
+                "publisher": feed.publisher, "licence": feed.licence,
+                "fetched_on": today, "publisher_updated": published,
+                "entries": entries,
+            }
+            note = ""
+            if published and published != today:
+                note = f"  (publisher last updated {published})"
+            print(f"  {feed.name:16} {len(entries):>7,} entries{note}")
+        except Exception as exc:                                # noqa: BLE001
+            carried = previous.get(feed.name)
+            if carried:
+                carried = dict(carried)
+                carried["stale_reason"] = (
+                    f"refresh on {today} failed ({type(exc).__name__}: {exc}); "
+                    f"entries are from {carried.get('fetched_on')}")
+                feeds[feed.name] = carried
+                print(f"  {feed.name:16} FAILED ({exc}) — carried forward "
+                      f"from {carried.get('fetched_on')}")
+            else:
+                feeds[feed.name] = {
+                    "url": feed.url, "kind": feed.kind, "sense": feed.sense,
+                    "publisher": feed.publisher, "licence": feed.licence,
+                    "fetched_on": today, "entries": [],
+                    "stale_reason": f"never fetched successfully: {exc}",
+                }
+                print(f"  {feed.name:16} FAILED ({exc}) — no previous copy")
+    total = sum(len(f.get("entries") or []) for f in feeds.values())
+    return {
+        "_meta": {
+            "built_on": today,
+            "entries": total,
+            "note": ("Vendored abuse feeds. Membership is an OBSERVATION with a "
+                     "source and a date, never a verdict about an asset. "
+                     "Absence proves nothing — see core/blocklists.py."),
+        },
+        "feeds": feeds,
+    }
+
+
+def _publisher_date(raw: str) -> str:
+    """The publisher's OWN 'Last updated' line, where it publishes one.
+
+    A fetch date is not a data date. Feodo Tracker served a list on 2026-08-23
+    whose header read 'Last updated: 2026-03-04'; recording only the fetch would
+    present five-month-old intelligence as same-day. Returns "" when the feed
+    publishes no such line, which is honest — unknown, not fresh.
+    """
+    from core import blocklists as bl
+    for line in raw.splitlines()[:30]:
+        lowered = line.lower()
+        if bl.PUBLISHER_DATE not in lowered:
+            continue
+        tail = lowered.split(bl.PUBLISHER_DATE, 1)[1].strip().lstrip("#").strip()
+        candidate = tail[:10]
+        try:
+            datetime.strptime(candidate, "%Y-%m-%d")
+        except ValueError:
+            continue
+        return candidate
+    return ""
+
+
+def _parse_feed(feed, raw: str) -> List[str]:
+    """One publisher's file to a sorted, deduplicated list of entries."""
+    if feed.name == "spamhaus_drop":
+        # JSON Lines, and the last line is a metadata record with no `cidr`.
+        out = set()
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(record, dict) and record.get("cidr"):
+                out.add(str(record["cidr"]))
+        return sorted(out)
+
+    out = set()
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith(feed.comment):
+            continue
+        out.add(line)
+    return sorted(out)
+
+
 def write(path: Path, payload: Dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
@@ -458,6 +581,13 @@ def main(argv=None) -> int:
                              "paths here refetch KEV and EPSS unconditionally, "
                              "so this is the flag to reach for when the "
                              "artefact index is the only thing that is stale")
+    parser.add_argument("--only-blocklists", action="store_true",
+                        help="refresh ONLY data/blocklists.json — the keyless "
+                             "abuse feeds. Every other corpus is left "
+                             "byte-identical, for the same reason "
+                             "--only-artefacts exists")
+    parser.add_argument("--skip-blocklists", action="store_true",
+                        help="do not refresh data/blocklists.json")
     parser.add_argument("--check", action="store_true",
                         help="report whether the vendored copy is current "
                              "without writing anything")
@@ -465,6 +595,11 @@ def main(argv=None) -> int:
 
     if args.only_artefacts:
         return _refresh_artefacts_only()
+
+    if args.only_blocklists:
+        print("Fetching keyless abuse feeds…")
+        write(DATA / "blocklists.json", fetch_blocklists())
+        return 0
 
     print("Fetching CISA KEV…")
     kev = fetch_kev()

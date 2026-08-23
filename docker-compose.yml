@@ -74,6 +74,11 @@ services:
       SKOPOS_SHODAN_API_KEY: ${SKOPOS_SHODAN_API_KEY:-}
       SKOPOS_VIRUSTOTAL_API_KEY: ${SKOPOS_VIRUSTOTAL_API_KEY:-}
       SKOPOS_HIBP_API_KEY: ${SKOPOS_HIBP_API_KEY:-}
+      # NOT a credential. Shodan's InternetDB is free for NON-COMMERCIAL use
+      # only, and whether that describes this deployment is a fact about the
+      # operator that SKOPOS must not assume. Unset, the source is inert and a
+      # lookup says so. See collect/internetdb.py.
+      SKOPOS_INTERNETDB_ACK: ${SKOPOS_INTERNETDB_ACK:-}
       SKOPOS_CONSOLE_DIR: /app/frontend/dist
       # Unset by default, and that is the safe state: without it the takeover
       # route and the TAXII server are NOT REGISTERED AT ALL. Both serve

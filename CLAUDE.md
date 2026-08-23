@@ -212,6 +212,8 @@ skopos/
 │   ├── findings_store.py     scan runs, findings, run-over-run diff
 │   ├── models.py             Asset, Exploited, Exposure, MatchBasis, Confidence
 │   ├── intel.py              vendored corpus + staleness reporting
+│   ├── blocklists.py         7 vendored abuse feeds. A hit is an OBSERVATION;
+│   │                         absence proves nothing and says so
 │   ├── inventory.py          aliased CSV/JSON ingest; rejects are RETURNED
 │   ├── match.py              the join, and what it refuses to claim
 │   ├── affected.py           CNA range evaluation (the determination tier)
@@ -225,6 +227,10 @@ skopos/
 │   ├── takeover.py           verdicts, mandatory evidence, the ceiling
 │   └── takeover_rules.py     provider catalogue + review dates
 ├── collect/
+│   ├── internetdb.py         Shodan's KEYLESS endpoint; ports/CVEs/versioned
+│   │                         CPEs. Non-commercial, so gated on an ACK not a key
+│   ├── shadowserver.py       parser for free daily reports on netblocks you
+│   │                         have PROVEN you own. No I/O — no API to poll
 │   ├── egress.py             the door discovery and probing go through
 │   ├── report.py             one degradation vocabulary for every subsystem
 │   ├── registry.py           sources, their terms, their defaults
@@ -252,9 +258,10 @@ skopos/
 ├── db/                       001 schema · 002 DNS · 003 findings · 004-005 ·
 │                             006 tenancy · 007 suppliers · 008 auth ·
 │                             009 accounts (is_admin, must_change_password)
-├── data/                     kev.json, epss.json — VERSIONED INPUTS
+├── data/                     kev.json, epss.json, blocklists.json —
+│                             VERSIONED INPUTS
 ├── docs/P1-BUILD-SPEC.md     the adversarial design pass, and its 86 problems
-└── tests/                    1,139 tests
+└── tests/                    1,256 tests
 ```
 
 **`accounts.py` is not `gate.py`, and must never become it.** The gate decides

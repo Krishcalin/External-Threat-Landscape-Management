@@ -65,9 +65,21 @@ class Source:
 
     @property
     def configured(self) -> bool:
-        if self.terms is not Terms.CREDENTIALED:
-            return True
-        return bool(os.environ.get(self.credential_env or ""))
+        """Whether this source can actually be called right now.
+
+        A CREDENTIALED source needs its key. A NONCOMMERCIAL source that
+        declares an env var needs that too — it is an ACKNOWLEDGEMENT rather
+        than a credential (see `collect/internetdb.py`), but a source nobody has
+        acknowledged is exactly as inert as one nobody has paid for, and
+        reporting it as configured would put "available" on a lookup panel for
+        something that will refuse every call.
+
+        A NONCOMMERCIAL source with no env var declared — `hackertarget` — is
+        unchanged: it has no switch, so there is nothing to check.
+        """
+        if self.credential_env:
+            return bool(os.environ.get(self.credential_env, "").strip())
+        return self.terms is not Terms.CREDENTIALED
 
 
 REGISTRY: Tuple[Source, ...] = (
@@ -104,11 +116,26 @@ REGISTRY: Tuple[Source, ...] = (
     # Registering them while unimplemented is deliberate. `unavailable` on a
     # lookup is built from this table, so "we cannot see open ports because
     # nobody supplied a Shodan key" is a fact the product can state today.
+    # Shodan's OWN free endpoint, and the reason the paid entry below may not be
+    # needed. Same crawl, five fields, no credential — so what gates it is not a
+    # key but the operator's answer to "is this deployment commercial", which
+    # SKOPOS must not answer for them. Same treatment as `hackertarget` above.
+    Source("internetdb", "advisory_lookup", DataClass.NAME_INDEX,
+           Terms.NONCOMMERCIAL, default_on=False,
+           credential_env="SKOPOS_INTERNETDB_ACK",
+           note="free for NON-COMMERCIAL use; commercial needs a Shodan "
+                "enterprise licence. Returns ports, CVE claims and versioned "
+                "CPEs for an IPv4 address. Index refreshed WEEKLY, so an answer "
+                "is up to seven days old and says so. No banners, so no product "
+                "is tied to a port. The env var is an acknowledgement, not a "
+                "credential"),
     Source("shodan", "advisory_lookup", DataClass.NAME_INDEX, Terms.CREDENTIALED,
            default_on=False, credential_env="SKOPOS_SHODAN_API_KEY",
            note="the only passive route to OPEN PORTS AND SERVICES for a target "
                 "this product may not probe. Paid tiers; terms restrict "
-                "redistribution, which the operator accepts, not SKOPOS"),
+                "redistribution, which the operator accepts, not SKOPOS. "
+                "Adds over `internetdb`: live rather than weekly, and banners "
+                "that tie a product to a specific port"),
     Source("virustotal", "advisory_lookup", DataClass.NAME_INDEX,
            Terms.CREDENTIALED, default_on=False,
            credential_env="SKOPOS_VIRUSTOTAL_API_KEY",

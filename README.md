@@ -382,6 +382,36 @@ both, it is not preventable while they can, and SKOPOS says so on the screen
 instead of implying otherwise. Every account action is written to the
 hash-chained audit log; no issued password ever is.
 
+**Three of the four paid feeds were replaced, and the fourth was kept because it
+costs $42 a year.** Measured rather than assumed, on 2026-08-22/23:
+
+- **Shodan → InternetDB.** Shodan's own keyless endpoint returns the same two
+  fields SKOPOS extracted from the paid API — `ports` and `vulns` — plus
+  versioned `cpes`, which are *better* input than free-text banners because a
+  CPE is already the catalogue's identifier format. It loses banner data (no
+  product tied to a port) and refreshes **weekly**, both stated on every answer.
+  It is **free for non-commercial use only**, so it stays inert until the
+  operator sets `SKOPOS_INTERNETDB_ACK` — SKOPOS will not decide an operator's
+  commerciality for them. Where a paid key exists it is used first.
+- **VirusTotal → seven vendored abuse feeds.** No open-source equivalent of a
+  70-engine aggregate exists. What does exist is bulk lists: 61,660 entries,
+  1.7 MB, queried in-process with no network call. The pattern is D1's, applied
+  again — the free thing is the file, the keyed thing is the question.
+- **Nothing → Shadowserver.** Free daily reports on netblocks you have *proven*
+  you own, which is machinery `core/ownership.py` already has. The one exception
+  to the licence wall: free commercially too.
+- **HIBP kept.** `/breachedaccount` is the only endpoint that requires payment,
+  no legitimate substitute exists, and $3.50/month is not where a budget goes.
+
+**Two feeds the sources still recommend are dead or dying**, found by fetching
+them rather than by reading a list. abuse.ch's **SSL Blacklist was deprecated on
+2025-01-03** and still answers HTTP 200 with a header saying so — a naive
+fetcher vendors an empty list and every lookup against it reads as clean; it is
+recorded in `core/blocklists.REJECTED` rather than silently omitted. **Feodo
+Tracker** serves five entries whose own header says last updated 2026-03-04, so
+the corpus carries the publisher's date beside the fetch date: a fetch date is
+not a data date.
+
 **Third parties are assessed passively, and cannot be assessed any other way.**
 A supplier's estate belongs to somebody else, the customer cannot prove
 ownership of it, and the gate refuses every active operation against an
