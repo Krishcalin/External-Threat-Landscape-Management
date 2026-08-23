@@ -272,6 +272,118 @@ def _shape_virustotal(status: int, body: str) -> SourceAnswer:
 
 
 # ── Have I Been Pwned ────────────────────────────────────────────────────────
+def hibp_domain(permit, domain: str, verified: bool, budget=None,
+                limiter=None) -> SourceAnswer:
+    """Breach exposure across a whole domain you have PROVEN you control.
+
+    WHY THIS TAKES A `verified` FLAG AND REFUSES WITHOUT IT. HIBP only answers
+    domain search for domains you have demonstrated control of, and SKOPOS
+    already performs exactly that proof — `core/ownership.py`, verification
+    records, 180-day expiry, because the gate refuses active operations against
+    unverified assets. Reusing that proof rather than inventing a second one
+    keeps one answer to "is this ours", and refusing here means the product
+    never asks HIBP a question it has no standing to ask.
+
+    WHAT COMES BACK AND WHAT DELIBERATELY DOES NOT. Breach NAMES and DATES and
+    a count. Never an address, never a password, never a hash. FR-GOV-002
+    forbids plaintext secret persistence and this must not be the thing that
+    tests it — and a list of which colleagues appear in which breach is a
+    document nobody should create casually.
+    """
+    key = _key("hibp")
+    if not key:
+        return _unavailable("hibp")
+    if not verified:
+        return SourceAnswer(
+            "hibp", False, False,
+            detail=("domain search needs a live ownership verification for "
+                    f"{domain!r}. HIBP will only answer for a domain you have "
+                    "proven you control, and SKOPOS will not ask on your "
+                    "behalf without the same proof it requires before probing "
+                    "anything."),
+            verified_live=VERIFIED_LIVE["hibp"])
+    url = ("https://haveibeenpwned.com/api/v3/breacheddomain/"
+           f"{domain}")
+    try:
+        response = egress.http_get(
+            permit, OPERATION, url, budget=budget, limiter=limiter,
+            headers={"hibp-api-key": key, "user-agent": "SKOPOS"})
+    except egress.PermitMismatch:
+        raise
+    except Exception as exc:                                    # noqa: BLE001
+        return SourceAnswer("hibp", True, False,
+                            detail=f"lookup failed: {type(exc).__name__}",
+                            verified_live=VERIFIED_LIVE["hibp"])
+    return _shape_hibp_domain(response.status, response.text, domain)
+
+
+def _shape_hibp_domain(status: int, body: str, domain: str) -> SourceAnswer:
+    """Split out so the parsing is testable without a key or a network.
+
+    The response is an object keyed by local part — {"alias": ["Breach", ...]}.
+    THE KEYS ARE DISCARDED. They are the addresses, and this product has no
+    reason to hold a list of which colleagues appear in which breach; the
+    breach names and the count are what informs a decision.
+    """
+    verified = VERIFIED_LIVE["hibp"]
+    if status == 404:
+        return SourceAnswer("hibp", True, True, detail=(
+            f"HIBP has no breached addresses recorded for {domain}. That is "
+            f"not a clean bill of health: it covers only breaches HIBP holds, "
+            f"and an address absent from every published corpus may simply be "
+            f"in one nobody has published."), verified_live=verified)
+    if status == 401:
+        return SourceAnswer("hibp", True, False,
+                            detail="the key was rejected (HTTP 401)",
+                            verified_live=verified)
+    if status == 403:
+        return SourceAnswer("hibp", True, False, detail=(
+            "HTTP 403 — HIBP does not consider this domain verified to your "
+            "account. Domain search requires proving control to HIBP as well "
+            "as to SKOPOS."), verified_live=verified)
+    if status != 200:
+        return SourceAnswer("hibp", True, False, detail=f"HTTP {status}",
+                            verified_live=verified)
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return SourceAnswer("hibp", True, False,
+                            detail="HTTP 200 with an unparseable body",
+                            verified_live=verified)
+    if not isinstance(payload, dict):
+        return SourceAnswer("hibp", True, False,
+                            detail="HTTP 200 with a non-object body",
+                            verified_live=verified)
+
+    breach_counts: Dict[str, int] = {}
+    addresses = 0
+    for _local_part, breaches in payload.items():
+        # The key is an address. It is not read, not stored and not returned.
+        addresses += 1
+        for name in breaches or []:
+            breach_counts[str(name)] = breach_counts.get(str(name), 0) + 1
+
+    observations = [{
+        "kind": "breach_exposure",
+        "breach": name,
+        "addresses_affected": count,
+        "source": "hibp",
+        "basis": ("addresses at this domain appear in a published breach "
+                  "corpus. NOT that any account is compromised now, that any "
+                  "password is still in use, or that anything should be "
+                  "revoked — the remedy is somebody's judgement."),
+    } for name, count in sorted(breach_counts.items(),
+                                key=lambda kv: (-kv[1], kv[0]))]
+
+    return SourceAnswer(
+        "hibp", True, True, observations,
+        detail=(f"{addresses} address(es) at {domain} appear across "
+                f"{len(breach_counts)} published breach(es). No address, "
+                f"password or hash is recorded by SKOPOS — only which "
+                f"breaches, and how many addresses each affected."),
+        verified_live=verified)
+
+
 def hibp_account(permit, address: str, budget=None,
                  limiter=None) -> SourceAnswer:
     """Breach corpora an email address appears in.
@@ -387,6 +499,7 @@ def consult_for_target(permit_for, target, budget=None,
 
 
 __all__ = ["OPERATION", "VERIFIED_LIVE", "UNVERIFIED_NOTE", "SourceAnswer",
-           "shodan_host", "virustotal_domain", "hibp_account",
+           "shodan_host", "virustotal_domain", "hibp_account", "hibp_domain",
+           "_shape_hibp_domain",
            "consult_for_target", "_shape_shodan", "_shape_virustotal",
            "_shape_hibp"]

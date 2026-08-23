@@ -353,6 +353,38 @@ CATALOGUE: Sequence[Rule] = (
          "attributed to the estate.",
          "core/overwatch.py", ("asset", "skopos", "overwatch")),
 
+    # ── certificate posture (P8 W3) ─────────────────────────────────────────
+    Rule("cert.expired", "The newest certificate for a host has expired",
+         Category.HYGIENE, Severity.CHECK,
+         "No certificate seen for this host is still valid.",
+         "A QUESTION, not a finding. A Certificate Transparency entry records "
+         "issuance, not deployment — the host may be decommissioned, may "
+         "terminate TLS somewhere else entirely, or may be genuinely broken, "
+         "and a log cannot tell those apart.",
+         "core/certificates.py", ("host", "issuer", "not_after", "days_ago")),
+    Rule("cert.expiring", "A certificate expires within 30 days",
+         Category.HYGIENE, Severity.CHECK,
+         "The newest certificate for this host expires inside one working "
+         "window.",
+         "Renewal is routine and usually automated. This is a working window "
+         "rather than an alarm, and an automated renewal will very often have "
+         "happened before anybody reads it.",
+         "core/certificates.py", ("host", "issuer", "not_after", "days_left")),
+    Rule("cert.weak_signature", "Certificate signed with a broken algorithm",
+         Category.HYGIENE, Severity.ACT,
+         "The certificate carries an MD5 or SHA-1 signature.",
+         "Only fires on algorithms that are broken rather than merely dated. "
+         "It says nothing about the key size, the chain above it, or whether "
+         "the certificate is deployed anywhere.",
+         "core/certificates.py", ("host", "signature_algorithm")),
+    Rule("cert.broad_san", "One certificate covers a great many names",
+         Category.HYGIENE, Severity.CONTEXT,
+         "A certificate carries more than 100 subject alternative names.",
+         "NOT wrong — a CDN or shared platform legitimately issues these. It "
+         "is a blast-radius observation: one private key is a single point of "
+         "failure for every name on it.",
+         "core/certificates.py", ("host", "san_count", "issuer")),
+
     # ── hygiene ─────────────────────────────────────────────────────────────
     Rule("hygiene.dns_changed", "A DNS record changed between runs",
          Category.HYGIENE, Severity.CONTEXT,
