@@ -98,3 +98,51 @@ export interface FindingsPage {
   returned: number
   findings: Finding[]
 }
+
+/** One DNS sweep and what it could NOT see.
+ *
+ *  The three gap counters are separate on purpose. A resolver outage
+ *  (`unobserved`), a resolver disagreement (`quorum_failed`) and an operator's
+ *  exclusion (`refused`) are different facts with different remedies, and an
+ *  aggregate "health" number would hide which one you are looking at. */
+export interface DnsRun {
+  id: number
+  started_at: string
+  actor: string
+  resolvers: string[]
+  /** Counted per (name, rrtype) PAIR. Per-name counting would let a name with
+   *  five of six record types failed report as fully observed. */
+  attempted: number
+  observed: number
+  quorum_failed: number
+  unobserved: number
+  refused: number
+  degraded: boolean
+}
+
+export interface DnsRunsPage {
+  total: number
+  runs: DnsRun[]
+}
+
+/** Deliberately has no `vulnerable` member, and never will. The only
+ *  experiment that would establish one is registering the resource, which the
+ *  gate refuses before scope or ownership are even consulted. */
+export type TakeoverVerdict =
+  | 'registrable_domain_unregistered'
+  | 'provider_guarded'
+  | 'internal_dangling'
+  | 'no_claim_signal_found'
+  | 'inconclusive'
+
+export interface TakeoverFinding {
+  name: string
+  verdict: TakeoverVerdict
+  corroboration: string
+  target: string
+  target_rcode: string
+  resolvers_agreeing: number
+  reasons: string[]
+  first_seen: string
+  last_seen: string
+}

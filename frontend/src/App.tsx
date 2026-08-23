@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
-import { ApiError, findings as fetchFindings, intel as fetchIntel,
-         reconciliationGuide, summary as fetchSummary } from './api/client'
-import type { Finding, IntelStatus, ReconciliationOutcome, Summary } from './api/types'
+import { ApiError, dnsRuns as fetchDnsRuns, findings as fetchFindings,
+         intel as fetchIntel, reconciliationGuide,
+         summary as fetchSummary } from './api/client'
+import type { DnsRun, Finding, IntelStatus, ReconciliationOutcome,
+              Summary } from './api/types'
+import { CoveragePanel } from './components/CoveragePanel'
 import { TepsBar } from './components/TepsBar'
 
 /**
@@ -145,6 +148,7 @@ export function App() {
   const [openRow, setOpenRow] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const [dnsRun, setDnsRun] = useState<DnsRun | null>(null)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -157,6 +161,11 @@ export function App() {
     // A 404 here means no scan has been run, which is a state and not a failure.
     fetchSummary().then(setSummary).catch(() => setSummary(null))
     fetchFindings(200).then((page) => setRows(page.findings)).catch(() => setRows([]))
+    // The newest sweep, for the coverage panel. Absent is a state, not an error:
+    // no sweep having run is not an estate with no DNS.
+    fetchDnsRuns()
+      .then((page) => setDnsRun(page.runs[0] ?? null))
+      .catch(() => setDnsRun(null))
   }, [])
 
   const unexplained = summary?.reconciliation?.unexplained_exposure ?? 0
@@ -188,6 +197,8 @@ export function App() {
 
       <main className="main stack">
         {error && <div className="banner banner-crit" role="alert">{error}</div>}
+
+        <CoveragePanel run={dnsRun} />
 
         {!summary && !error && (
           <div className="banner banner-info">

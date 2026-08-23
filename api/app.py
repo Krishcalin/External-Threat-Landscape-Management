@@ -43,8 +43,14 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
-# The console is served from a different origin in development only. In a
-# deployment the SPA is served by this app, so no origin is granted by default.
+# CORS is a BROWSER-side cross-origin control, and the Dockerfile serves the SPA
+# from the SAME origin as this API, where CORS never applies at all. This block
+# exists only so `npm run dev` on :5173 can reach the API on :8000.
+#
+# It is NOT what makes this API read-only. The API is read-only because no write
+# route exists — and POST /api/v1/scan already exists and is callable with curl.
+# A future contributor who reads `allow_methods=["GET"]` as "GET-only by
+# construction" and adds a POST would believe something false about the product.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -66,7 +72,15 @@ def _corpus():
 
 @app.get("/api/v1/health", tags=["ops"])
 def health() -> Dict[str, Any]:
-    return {"status": "ok", "version": app.version}
+    return {
+        "status": "ok",
+        "version": app.version,
+        # Stated rather than left to be discovered by a 404. An operator who
+        # cannot find the takeover route needs to know it is unconfigured, not
+        # broken.
+        "takeover_route": ("registered" if TAKEOVER_ROUTE_REGISTERED
+                           else "not registered — set SKOPOS_API_TOKEN"),
+    }
 
 
 @app.get("/api/v1/intel", tags=["intelligence"])
@@ -195,6 +209,90 @@ def reconciliation_guide() -> Dict[str, str]:
     cannot drift into describing the same state differently.
     """
     return {k.value: v for k, v in RECONCILIATION_MEANING.items()}
+
+
+# ---------------------------------------------------------------------------
+# P1 surfaces: discovery coverage, DNS, takeover.
+#
+# Meaning strings are SERVED rather than hard-coded in the console, on the
+# RECONCILIATION_MEANING precedent — so the API, the CLI and the UI cannot drift
+# into describing the same state differently.
+# ---------------------------------------------------------------------------
+def _dns_store():
+    from core.dns_store import open_dns_store
+    from core.store import StoreUnavailable
+    try:
+        return open_dns_store()
+    except StoreUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+@app.get("/api/v1/dns/runs", tags=["dns"])
+def dns_runs(limit: int = Query(20, ge=1, le=200)) -> Dict[str, Any]:
+    """Past sweeps and their coverage.
+
+    Every run carries what it could NOT see. A sweep that observed 66 of 70
+    pairs is a different claim from one that observed 70, and a reader deciding
+    whether "0 changes" means a quiet night needs both numbers.
+    """
+    rows = _dns_store().runs(limit)
+    return {"total": len(rows), "runs": rows}
+
+
+@app.get("/api/v1/dns/change-meaning", tags=["dns"])
+def dns_change_meaning() -> Dict[str, str]:
+    from core.dns_state import CHANGE_MEANING
+    return CHANGE_MEANING
+
+
+@app.get("/api/v1/takeover/meaning", tags=["takeover"])
+def takeover_meaning() -> Dict[str, str]:
+    from core.takeover import TAKEOVER_MEANING
+    return TAKEOVER_MEANING
+
+
+@app.get("/api/v1/attestation-meaning", tags=["findings"])
+def attestation_meaning() -> Dict[str, str]:
+    from core.identity import ATTESTATION_MEANING
+    return ATTESTATION_MEANING
+
+
+#: A ranked list of dangling subdomains with evidence attached is finished
+#: reconnaissance against the customer. It is the first content in this product
+#: where the absence of authentication genuinely matters, so the route is not
+#: registered at all unless a token is configured — an unset token must not
+#: leave it open, and a 401 that can be probed is still an admission the data
+#: exists.
+TAKEOVER_TOKEN = os.environ.get("SKOPOS_API_TOKEN", "")
+
+
+def _register_takeover(application: FastAPI) -> bool:
+    if not TAKEOVER_TOKEN:
+        return False
+
+    from fastapi import Header
+
+    @application.get("/api/v1/takeover", tags=["takeover"])
+    def takeover(limit: int = Query(50, ge=1, le=500),
+                 authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
+        import hmac as _hmac
+
+        presented = (authorization or "").removeprefix("Bearer ").strip()
+        if not _hmac.compare_digest(presented, TAKEOVER_TOKEN):
+            raise HTTPException(status_code=401, detail="a bearer token is required")
+        from core.takeover import TAKEOVER_MEANING
+        rows = _dns_store().findings(limit)
+        return {"total": len(rows), "findings": rows,
+                "meaning": TAKEOVER_MEANING,
+                "ceiling": "There is no 'vulnerable' verdict in this product. "
+                           "The only experiment that would establish one is "
+                           "registering the resource, which is refused before "
+                           "scope or ownership are consulted."}
+
+    return True
+
+
+TAKEOVER_ROUTE_REGISTERED = _register_takeover(app)
 
 
 # ---------------------------------------------------------------------------

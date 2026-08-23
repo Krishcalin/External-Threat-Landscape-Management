@@ -67,6 +67,16 @@ def cmd_scan(args) -> int:
     exposures = match.match(assets, corpus.entries())
     unmatched = match.unmatched_assets(assets, exposures)
 
+    # Outside-in reachability, if a fingerprint run supplied it. Before P1
+    # nothing in the product could answer this, so every finding reconciled to
+    # UNKNOWN and the four-way matrix only ever had one of its two inputs.
+    from core import reach
+    reachability = {}
+    for asset in assets:
+        reachable, open_ports = reach.from_row(asset.attributes)
+        if reachable is not None:
+            reachability[asset.identifier] = (reachable, open_ports)
+
     if args.json:
         print(json.dumps({
             "catalogue": {"version": corpus.catalog_version,
@@ -141,6 +151,14 @@ def cmd_scan(args) -> int:
     if rejected:
         print(f"{len(rejected)} inventory row(s) could not be read "
               f"(first reason: {rejected[0]['reason']}). They were NOT scanned.")
+        print()
+
+    if reachability:
+        answering = sum(1 for r, _ in reachability.values() if r)
+        print(f"{len(reachability)} asset(s) carry fingerprint evidence of "
+              f"outside-in reachability; {answering} answered on at least one "
+              f"probed port. Assets without it are UNKNOWN rather than "
+              f"unreachable.")
         print()
 
     print(WORKLIST_NOTICE)
