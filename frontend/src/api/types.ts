@@ -146,3 +146,29 @@ export interface TakeoverFinding {
   first_seen: string
   last_seen: string
 }
+
+/** One finding and the independent signals that put it in the crosshair. */
+export interface AimedEntry {
+  asset: string
+  cve: string
+  product: string
+  owner: string | null
+  teps: number
+  tier: 'converged' | 'elevated' | 'present'
+  signals: string[]
+  /** What could NOT be established. A gap in OUR coverage, not evidence of
+   *  safety — and it is what holds an entry out of the top tier. */
+  unknown: string[]
+}
+
+export interface CrosshairView {
+  headline: string
+  total_findings: number
+  tiers: Record<string, AimedEntry[]>
+  coverage_gaps: Record<string, number>
+  signal_meaning: Record<string, string>
+  tier_meaning: Record<string, string>
+  /** Rendered, never tucked into a tooltip: a screen called Crosshair invites
+   *  exactly the reading this product has to refuse. */
+  not_targeting: string
+}

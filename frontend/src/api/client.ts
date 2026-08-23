@@ -1,4 +1,5 @@
-import type { DnsRunsPage, FindingsPage, IntelStatus, Summary } from './types'
+import type { CrosshairView, DnsRunsPage, FindingsPage, IntelStatus,
+              Summary } from './types'
 
 /** Relative paths only: the built bundle carries no origin, so it can be served
  *  by the API itself in a deployment and proxied in development. */
@@ -41,3 +42,5 @@ export const takeoverMeaning = () => get<Record<string, string>>('/takeover/mean
  *  finished reconnaissance against the customer. Shipping a client call that
  *  401s from an unauthenticated SPA would imply the console is the place to
  *  read it; it is not, until there is a session to carry the token. */
+
+export const crosshair = () => get<CrosshairView>('/crosshair?limit=200')

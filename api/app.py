@@ -475,6 +475,49 @@ def accuracy_method() -> Dict[str, Any]:
     }
 
 
+@app.get("/api/v1/crosshair", tags=["findings"])
+def crosshair(limit: int = Query(200, ge=1, le=500)) -> Dict[str, Any]:
+    """Convergence: what is being fired at the internet that you stand in front of.
+
+    NOT a claim about who is targeting you. SKOPOS cannot attribute a CVE to a
+    threat actor and has the measurement to prove it — the one open mapping
+    implicates a median of 57 groups per CVE, 139 at the extreme out of 191. A
+    screen naming your attackers would be the least honest thing this product
+    could ship, and the response says so in `not_targeting`.
+    """
+    from core import crosshair as _crosshair
+    from core import intel as _intel
+    from core import velocity as _velocity
+
+    store = _findings_store()
+    rows = store.findings(limit=limit)
+    try:
+        corpus = _intel.load()
+        decisions = {f["cve"]: corpus.automatable(f["cve"]) for f in rows}
+    except _intel.IntelUnavailable:
+        decisions = {}
+
+    # EPSS velocity, where enough history exists to compute one. On a young
+    # record this is empty, and an empty accelerating set means "we have not
+    # been watching long enough", never "nothing is moving".
+    moving = []
+    try:
+        from core.forecast_store import open_forecast_store
+        forecasts = open_forecast_store()
+        for row in rows:
+            series = forecasts.epss_series(row["cve"], days=30)
+            reading = _velocity.compute(row["cve"], series)
+            if reading and reading.accelerating:
+                moving.append(row["cve"])
+    except StoreUnavailable:
+        pass
+
+    board = _crosshair.build(rows, automatable=decisions, accelerating=moving)
+    payload = board.to_dict()
+    payload["velocity_available"] = bool(moving) or None
+    return payload
+
+
 # ---------------------------------------------------------------------------
 # The console.
 #

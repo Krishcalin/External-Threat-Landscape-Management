@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
-import { ApiError, dnsRuns as fetchDnsRuns, findings as fetchFindings,
+import { ApiError, crosshair as fetchCrosshair,
+         dnsRuns as fetchDnsRuns, findings as fetchFindings,
          intel as fetchIntel, reconciliationGuide,
          summary as fetchSummary } from './api/client'
-import type { DnsRun, Finding, IntelStatus, ReconciliationOutcome,
+import type { CrosshairView, DnsRun, Finding, IntelStatus,
+              ReconciliationOutcome,
               Summary } from './api/types'
 import { CoveragePanel } from './components/CoveragePanel'
+import { CrosshairPanel } from './components/CrosshairPanel'
 import { TepsBar } from './components/TepsBar'
 
 /**
@@ -149,6 +152,7 @@ export function App() {
   const [error, setError] = useState('')
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [dnsRun, setDnsRun] = useState<DnsRun | null>(null)
+  const [crosshair, setCrosshair] = useState<CrosshairView | null>(null)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -166,6 +170,9 @@ export function App() {
     fetchDnsRuns()
       .then((page) => setDnsRun(page.runs[0] ?? null))
       .catch(() => setDnsRun(null))
+    // Absent is a state, not an error: no scan on record is not an estate with
+    // nothing in the crosshair.
+    fetchCrosshair().then(setCrosshair).catch(() => setCrosshair(null))
   }, [])
 
   const unexplained = summary?.reconciliation?.unexplained_exposure ?? 0
@@ -206,6 +213,8 @@ export function App() {
 
       <main className="main stack">
         {error && <div className="banner banner-crit" role="alert">{error}</div>}
+
+        <CrosshairPanel view={crosshair} />
 
         <CoveragePanel run={dnsRun} />
 
