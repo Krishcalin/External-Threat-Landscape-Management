@@ -317,7 +317,9 @@ class Lookup:
         # scored as zero, and it was doing exactly that within twenty lines of
         # saying so. A factor is observed only when a real boolean arrived.
         locked = self.registration.get("locked")
-        if isinstance(locked, bool):
+        # `observed` False means the lookup failed or was redirected somewhere
+        # unallowlisted — not that the domain has no lock.
+        if self.registration.get("observed") and isinstance(locked, bool):
             result.factors[Factor.REGISTRATION.value] = 1.0 if locked else 0.0
             result.inputs[Factor.REGISTRATION.value] = [
                 f"{key}: {value}" for key, value in self.registration.items()

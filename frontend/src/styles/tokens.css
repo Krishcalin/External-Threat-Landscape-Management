@@ -400,3 +400,18 @@ tbody tr:hover { background: var(--panel2); }
   border-bottom: 2px solid var(--crit);
   text-align: center;
 }
+
+/* ── the lookup ────────────────────────────────────────────────────────────
+   One input, wide, because what goes in it is a domain or a CIDR and both are
+   long enough that a narrow box hides the end of what was typed. */
+.lookup-form { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.lookup-input {
+  flex: 1 1 340px;
+  font: inherit; font-size: 15px; font-family: var(--font-mono);
+  padding: 10px 14px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--panel); color: var(--ink);
+}
+.lookup-input:focus-visible { border-color: var(--accent); }
+.lookup-h3 { font-size: 14px; font-weight: 650; margin: 0 0 var(--space-2); }
+.chip-wrap { display: flex; flex-wrap: wrap; gap: 6px; }

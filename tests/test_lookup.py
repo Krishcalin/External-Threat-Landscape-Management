@@ -124,10 +124,13 @@ def test_an_unobserved_factor_is_never_scored_as_zero():
 
 
 def test_a_read_lock_is_scored():
+    """`observed` is required, not just `locked`. A payload carrying a lock
+    field without saying the lookup succeeded is exactly the ambiguity the
+    unobserved-is-not-zero rule exists to remove."""
     found = lookup.Lookup(target=lookup.parse("example.com"),
-                          registration={"locked": True})
+                          registration={"observed": True, "locked": True})
     assert found.score().factors["registration"] == 1.0
-    found.registration = {"locked": False}
+    found.registration = {"observed": True, "locked": False}
     assert found.score().factors["registration"] == 0.0
 
 
@@ -138,7 +141,7 @@ def test_the_score_always_arrives_decomposed():
                           names=["a.example.com"] * 30,
                           posture=_posture([suppliers.Signal.CAA],
                                            [suppliers.Signal.MTA_STS]),
-                          registration={"locked": True})
+                          registration={"observed": True, "locked": True})
     payload = found.score().to_dict()
     assert payload["value"] is not None
     for name, factor in payload["factors"].items():
@@ -213,3 +216,119 @@ def test_unavailable_sources_travel_in_the_payload():
                       "terms": "credentialed"}])
     assert found.to_dict()["unavailable_sources"][0]["source"] == "shodan"
     assert "PASSIVE and cannot be anything else" in found.to_dict()["passive_only"]
+
+
+# ── the licensed sources ────────────────────────────────────────────────────
+def test_no_key_is_reported_as_unavailable_not_as_an_answer(monkeypatch):
+    """The single most consequential lie this module could tell: 'we have no
+    key' rendered as 'there is nothing there'."""
+    from collect import keyed_sources
+    monkeypatch.delenv("SKOPOS_SHODAN_API_KEY", raising=False)
+    answer = keyed_sources.shodan_host(None, "203.0.113.4")
+    assert answer.available is False and answer.answered is False
+    assert "That is NOT a result" in answer.detail
+
+
+def test_shodan_404_is_an_answer_and_says_what_it_means():
+    """Shodan 404 means it has never scanned the address, not that nothing is
+    listening on it."""
+    from collect import keyed_sources
+    answer = keyed_sources._shape_shodan(404, "")
+    assert answer.answered is True
+    assert "never that nothing is listening" in answer.detail
+
+
+def test_shodan_vulns_are_never_promoted_to_a_determination():
+    """Shodan derives them from a banner, and this product refuses to let an
+    observed version reach the field a published range is evaluated against.
+    Carrying them as findings would route around that through a third party."""
+    import json
+
+    from collect import keyed_sources
+    body = json.dumps({"ports": [443], "data": [], "vulns": ["CVE-2021-23017"]})
+    answer = keyed_sources._shape_shodan(200, body)
+    claim = [o for o in answer.observations if o["kind"] == "vuln_claim"][0]
+    assert "not a version comparison" in claim["basis"]
+    assert "does not join it to the catalogue" in claim["basis"]
+
+
+def test_a_rejected_key_is_distinguished_from_an_empty_answer():
+    from collect import keyed_sources
+    for shape, status in ((keyed_sources._shape_shodan, 401),
+                          (keyed_sources._shape_virustotal, 401),
+                          (keyed_sources._shape_hibp, 401)):
+        answer = shape(status, "")
+        assert answer.available is True and answer.answered is False
+        assert "rejected" in answer.detail
+
+
+def test_rate_limiting_is_reported_rather_than_retried_silently():
+    from collect import keyed_sources
+    assert "rate limited" in keyed_sources._shape_virustotal(429, "").detail
+    assert "rate limited" in keyed_sources._shape_hibp(429, "").detail
+
+
+def test_virustotal_counts_are_carried_whole_not_reduced_to_a_boolean():
+    """Engines disagree constantly; two flags out of ninety is noise."""
+    import json
+
+    from collect import keyed_sources
+    body = json.dumps({"data": {"attributes": {"last_analysis_stats": {
+        "malicious": 2, "suspicious": 1, "harmless": 70, "undetected": 17}}}})
+    observation = keyed_sources._shape_virustotal(200, body).observations[0]
+    assert observation["malicious"] == 2 and observation["engines"] == 90
+    assert "noise, not a verdict" in observation["meaning"]
+    assert "none of it says who is behind anything" in observation["meaning"]
+
+
+def test_hibp_says_what_a_breach_does_not_mean():
+    import json
+
+    from collect import keyed_sources
+    body = json.dumps([{"Name": "X", "BreachDate": "2019-01-01",
+                        "DataClasses": ["Passwords"], "IsVerified": True}])
+    observation = keyed_sources._shape_hibp(200, body).observations[0]
+    assert "does not say the account is compromised now" in observation["meaning"]
+
+
+def test_hibp_404_is_a_real_answer():
+    from collect import keyed_sources
+    answer = keyed_sources._shape_hibp(404, "")
+    assert answer.answered is True and "not a guarantee" in answer.detail
+
+
+def test_no_live_path_claims_to_be_verified():
+    """These were written against documented contracts and have never run
+    against the real services. Every answer carries that until somebody flips
+    it after a run with a real key."""
+    from collect import keyed_sources
+    assert not any(keyed_sources.VERIFIED_LIVE.values())
+    answer = keyed_sources._shape_shodan(404, "")
+    assert answer.to_dict()["caveat"] is not None
+    assert "has NOT been executed against the real service" in answer.to_dict()["caveat"]
+
+
+def test_a_licensed_host_is_allowlisted_but_holds_no_credential():
+    """Being reachable is not being configured."""
+    from collect import egress, registry
+    for host in ("api.shodan.io", "www.virustotal.com", "haveibeenpwned.com"):
+        assert host in egress.ALLOWED_HTTP_HOSTS
+    for name in ("shodan", "virustotal", "hibp"):
+        assert registry.BY_NAME[name].configured is False
+
+
+# ── registration ────────────────────────────────────────────────────────────
+def test_a_failed_registration_lookup_is_unobserved_not_unlocked():
+    """Our outage must not render as their negligence."""
+    found = lookup.Lookup(target=lookup.parse("example.com"),
+                          registration={"observed": False, "detail": "timeout"})
+    assert found.score().factors["registration"] is None
+
+
+def test_a_redirect_off_the_allowlist_is_not_followed():
+    import inspect
+
+    from collect import takeover_scan
+    source = inspect.getsource(takeover_scan.rdap_registration)
+    assert "ALLOWED_HTTP_HOSTS" in source
+    assert "not followed" in source

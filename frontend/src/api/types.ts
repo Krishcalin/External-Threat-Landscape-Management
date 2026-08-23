@@ -447,3 +447,73 @@ export interface EnrolConfirmed {
   note: string
   next: string
 }
+
+/* ── the lookup ────────────────────────────────────────────────────────────
+ * Note what is NOT here: no grade, no letter, no single verdict field. The
+ * score arrives with its decomposition attached or it does not arrive. */
+
+export interface ScoreFactor {
+  value: number | null
+  observed: boolean
+  inputs: string[]
+  measures: string
+  /** Rendered beside every factor. The limits are the point. */
+  cannot_see: string
+}
+
+export interface LookupScore {
+  value: number | null
+  publishable: boolean
+  minimum_factors: number
+  factors: Record<string, ScoreFactor>
+  /** Present when too few factors were observed to publish anything. */
+  refusal: string | null
+  not_a_grade: string
+  unobserved: string[]
+}
+
+export interface KeyedSource {
+  source: string
+  /** False means no key. NOT the same as answering and finding nothing. */
+  available: boolean
+  answered: boolean
+  observations: Record<string, unknown>[]
+  detail: string
+  verified_live: boolean
+  caveat: string | null
+}
+
+export interface UnavailableSource {
+  source: string
+  why: string
+  cost: string
+  terms: string
+}
+
+export interface LookupResult {
+  target: { raw: string; kind: string; value: string; addresses: string[] }
+  headline: string
+  score: LookupScore
+  names: string[]
+  reverse_dns: Record<string, string>
+  registration: Record<string, unknown>
+  posture: SupplierPosture | null
+  unavailable_sources: UnavailableSource[]
+  keyed_sources: KeyedSource[]
+  passive_only: string
+  coverage: { attempted: number; observed: number; refused: unknown[] }
+}
+
+export interface SourceCatalogue {
+  sources: {
+    name: string
+    operation: string
+    terms: string
+    configured: boolean
+    default_on: boolean
+    credential_env: string | null
+    note: string
+  }[]
+  terms_reviewed_on: string
+  note: string
+}

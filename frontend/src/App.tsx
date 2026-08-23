@@ -15,6 +15,7 @@ import type { Accuracy, AlertsView, CertInStatus, CiiRegister, ControlMapping,
               Summary, Tenancy } from './api/types'
 import { AccuracyPanel } from './components/AccuracyPanel'
 import { ExecutivePanel } from './components/ExecutivePanel'
+import { LookupPanel } from './components/LookupPanel'
 import { OperationsPanel } from './components/OperationsPanel'
 import { SupplierPanel } from './components/SupplierPanel'
 import { AlertsPanel } from './components/AlertsPanel'
@@ -47,7 +48,7 @@ import { TepsBar } from './components/TepsBar'
  */
 
 type Section = 'worklist' | 'operations' | 'executive' | 'crosshair'
-  | 'suppliers' | 'compliance' | 'accuracy' | 'alerts' | 'system'
+  | 'lookup' | 'suppliers' | 'compliance' | 'accuracy' | 'alerts' | 'system'
 
 /** Worklist first because it is what somebody opens the console to do; System
  *  last because it answers a question asked once per deployment. */
@@ -58,6 +59,9 @@ const SECTIONS: { id: Section; label: string }[] = [
   { id: 'operations', label: 'Operations' },
   { id: 'executive', label: 'Executive' },
   { id: 'crosshair', label: 'Crosshair' },
+  // Adjacent to Suppliers: both ask what the outside world can see about
+  // somebody else, and both are passive because they structurally must be.
+  { id: 'lookup', label: 'Lookup' },
   { id: 'suppliers', label: 'Suppliers' },
   { id: 'alerts', label: 'Alerts' },
   { id: 'compliance', label: 'Compliance' },
@@ -203,6 +207,7 @@ export function App() {
   const [supplierRegister, setSupplierRegister] = useState<SupplierRegister | null>(null)
   const [runs, setRuns] = useState<RunRow[]>([])
   const [changes, setChanges] = useState<ChangesView | null>(null)
+  const [session, setSession] = useState<{ username: string } | null>(null)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -244,6 +249,11 @@ export function App() {
     fetchSuppliers().then(setSupplierRegister).catch(() => setSupplierRegister(null))
     fetchRuns().then((page) => setRuns(page.runs)).catch(() => setRuns([]))
     fetchChanges().then(setChanges).catch(() => setChanges(null))
+    // The actor on a lookup permit. Falls back to 'console' on an
+    // unauthenticated instance, which the audit record then shows.
+    fetch('/api/v1/auth/session', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null)).then(setSession)
+      .catch(() => setSession(null))
   }, [])
 
   const unexplained = summary?.reconciliation?.unexplained_exposure ?? 0
@@ -315,6 +325,10 @@ export function App() {
         {section === 'executive' && (
           <ExecutivePanel runs={runs} accuracy={accuracy} crosshair={crosshair}
                           suppliers={supplierRegister} summary={summary} />
+        )}
+
+        {section === 'lookup' && (
+          <LookupPanel actor={session?.username ?? 'console'} />
         )}
 
         {section === 'suppliers' && (

@@ -97,6 +97,11 @@ ALLOWED_HTTP_HOSTS: frozenset = frozenset({
     "api.mnemonic.no", "otx.alienvault.com",
     "rdap.org", "rdap.verisign.com", "www.rdap.net",
     "api.osv.dev", "euvdservices.enisa.europa.eu",
+    # Licensed sources. On the allowlist so a call is POSSIBLE; each is still
+    # inert until its key is configured, and each carries the key in a header or
+    # a query the operator supplied. Being listed here grants reachability, not
+    # a credential.
+    "api.shodan.io", "www.virustotal.com", "haveibeenpwned.com",
 })
 
 #: Third-party recursive resolvers. Not the customer's.

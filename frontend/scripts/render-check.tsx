@@ -9,6 +9,7 @@
 import { renderToString } from 'react-dom/server'
 import { AccuracyPanel } from '../src/components/AccuracyPanel'
 import { ExecutivePanel } from '../src/components/ExecutivePanel'
+import { LookupPanel } from '../src/components/LookupPanel'
 import { OperationsPanel } from '../src/components/OperationsPanel'
 import { SupplierPanel } from '../src/components/SupplierPanel'
 import { AlertsPanel } from '../src/components/AlertsPanel'
@@ -69,6 +70,7 @@ async function main() {
     ['Crosshair (null)', () => <CrosshairPanel view={null} latency={null} />],
     ['Coverage', () => <CoveragePanel run={dns?.runs?.[0] ?? null} />],
     ['Suppliers', () => <SupplierPanel register={suppliers} />],
+    ['Lookup (idle)', () => <LookupPanel actor="render-check" />],
     ['Suppliers (null)', () => <SupplierPanel register={null} />],
     ['Executive', () => <ExecutivePanel runs={runs?.runs ?? []} accuracy={accuracy}
                                         crosshair={crosshair} suppliers={suppliers}

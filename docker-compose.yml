@@ -69,6 +69,11 @@ services:
       SKOPOS_PENDING_SECRET: ${SKOPOS_PENDING_SECRET:-}
       SKOPOS_BOOTSTRAP_USER: ${SKOPOS_BOOTSTRAP_USER:-}
       SKOPOS_BOOTSTRAP_PASSWORD: ${SKOPOS_BOOTSTRAP_PASSWORD:-}
+      # Licensed sources. Each is inert until set; a lookup without one reports
+      # it as unavailable rather than returning a clean result.
+      SKOPOS_SHODAN_API_KEY: ${SKOPOS_SHODAN_API_KEY:-}
+      SKOPOS_VIRUSTOTAL_API_KEY: ${SKOPOS_VIRUSTOTAL_API_KEY:-}
+      SKOPOS_HIBP_API_KEY: ${SKOPOS_HIBP_API_KEY:-}
       SKOPOS_CONSOLE_DIR: /app/frontend/dist
       # Unset by default, and that is the safe state: without it the takeover
       # route and the TAXII server are NOT REGISTERED AT ALL. Both serve

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from collect import egress
 from collect.dns_wire import RRType, Rcode
@@ -173,4 +173,71 @@ def assess(sweep, actor: str, scope, resolve_target,
                           assessed=assessed)
 
 
-__all__ = ["rdap_lookup", "assess", "RDAP_OPERATION"]
+def rdap_registration(permit, domain: str, budget=None, limiter=None
+                      ) -> Dict[str, Any]:
+    """Registration detail, including the transfer lock. PASSIVE.
+
+    Separate from `rdap_lookup`, which answers one question — does a
+    registration exist — and feeds the takeover verdict. Widening that function
+    would put a takeover-critical path at the mercy of extra parsing.
+
+    ONE REDIRECT, FOLLOWED BY HAND. rdap.org is a bootstrap service and answers
+    .com with a 302 to the registry's own server, so the registration factor was
+    permanently unobservable through it. `egress.http_get` deliberately does not
+    follow redirects — urllib's handler would send the request to whatever host
+    the response named, with no allowlist check.
+
+    So the target is taken from `redirect_to`, ITS HOST IS CHECKED AGAINST THE
+    ALLOWLIST HERE, and a second explicit request is made. Every destination is
+    still validated; nothing is followed blindly.
+    """
+    from urllib.parse import urlparse
+
+    url = f"https://rdap.org/domain/{domain}"
+    for _ in range(2):
+        try:
+            response = egress.http_get(permit, RDAP_OPERATION, url,
+                                       budget=budget, limiter=limiter,
+                                       headers={"Accept": "application/rdap+json"})
+        except egress.PermitMismatch:
+            raise
+        except Exception as exc:                                # noqa: BLE001
+            return {"observed": False,
+                    "detail": f"lookup failed: {type(exc).__name__}"}
+
+        if response.redirect_to:
+            host = (urlparse(response.redirect_to).hostname or "").lower()
+            if host not in egress.ALLOWED_HTTP_HOSTS:
+                return {"observed": False,
+                        "detail": f"redirected to {host!r}, which is not a "
+                                  f"registered source host; not followed"}
+            url = response.redirect_to
+            continue
+
+        if response.status != 200:
+            return {"observed": False, "detail": f"RDAP HTTP {response.status}"}
+        try:
+            payload = json.loads(response.text)
+        except ValueError:
+            return {"observed": False, "detail": "RDAP 200, unparseable body"}
+
+        statuses = [str(v).lower() for v in (payload.get("status") or [])]
+        # EPP status codes. A client-side transfer lock is the one an owner
+        # sets; a server-side one is the registry's. Either means transfer is
+        # refused, which is what the factor measures.
+        locked = any("transfer prohibited" in v for v in statuses)
+        events = {str(e.get("eventAction") or "").lower(): e.get("eventDate")
+                  for e in (payload.get("events") or [])}
+        return {
+            "observed": True,
+            "locked": locked,
+            "statuses": statuses,
+            "registered_on": str(events.get("registration") or "")[:10] or None,
+            "expires_on": str(events.get("expiration") or "")[:10] or None,
+            "detail": ("transfer is locked" if locked else
+                       "NO transfer lock is set on this registration"),
+        }
+    return {"observed": False, "detail": "too many redirects"}
+
+
+__all__ = ["rdap_lookup", "rdap_registration", "assess", "RDAP_OPERATION"]

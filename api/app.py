@@ -1197,17 +1197,34 @@ def lookup_target(body: _LookupBody) -> Dict[str, Any]:
         try:
             permit = _gate.authorise(target.value, takeover_scan.RDAP_OPERATION,
                                      body.actor, scope, kind=ScopeKind.DOMAIN)
-            status, detail = takeover_scan.rdap_lookup(permit, target.value)
-            found.registration = {"status": status.value, "detail": detail,
-                                  # RDAP tells us the registration EXISTS. It is
-                                  # not read for a transfer lock here, so the
-                                  # REGISTRATION factor stays unobserved rather
-                                  # than being scored from a field nobody read.
-                                  "locked": None}
-        except Exception:                                       # noqa: BLE001
-            pass
+            found.registration = takeover_scan.rdap_registration(permit,
+                                                                 target.value)
+        except Exception as exc:                                # noqa: BLE001
+            # Unobserved, never "unlocked". A failed lookup that scored as an
+            # absent transfer lock would be our outage rendered as their
+            # negligence.
+            found.registration = {"observed": False,
+                                  "detail": f"{type(exc).__name__}"}
+
+    # The licensed sources. Each is inert without its key and reports itself as
+    # unavailable rather than absent — "we have no key" must never render as
+    # "there is nothing there".
+    from collect import keyed_sources as _keyed
+    answers = []
+    try:
+        def permit_for(operation: str):
+            return _gate.authorise(target.value, operation, body.actor,
+                                   Scope([ScopeRule(kind=ScopeKind.DOMAIN,
+                                                    value=target.value)]),
+                                   kind=ScopeKind.DOMAIN)
+        answers = _keyed.consult_for_target(permit_for, target)
+    except Exception as exc:                                    # noqa: BLE001
+        found.unavailable.append({
+            "source": "keyed", "why": f"{type(exc).__name__}: {str(exc)[:60]}",
+            "cost": "no third-party service or reputation data", "terms": "n/a"})
 
     payload = found.to_dict()
+    payload["keyed_sources"] = [a.to_dict() for a in answers]
     payload["coverage"] = {
         "attempted": observed["attempted"],
         "observed": observed["observed"],

@@ -1,6 +1,7 @@
 import type { Accuracy, AlertsView, CertInStatus, CiiRegister,
               ControlMapping, CrosshairView, DnsRunsPage, FindingsPage,
               ChangesView, IntelStatus, LatencyReport, RunsPage, Summary,
+              LookupResult, SourceCatalogue,
               SupplierRegister, Tenancy } from './types'
 
 /** Relative paths only: the built bundle carries no origin, so it can be served
@@ -82,3 +83,27 @@ export const supplierRegister = () => get<SupplierRegister>('/suppliers')
 /* ── the projections ──────────────────────────────────────────────────────── */
 export const runs = () => get<RunsPage>('/runs?limit=20')
 export const changes = () => get<ChangesView>('/changes')
+
+/* ── the lookup ────────────────────────────────────────────────────────────
+ * A POST because it performs outbound lookups against somebody else's estate,
+ * and every permit names an actor. Passive throughout — see `passive_only` in
+ * the response, which is rendered rather than assumed. */
+export async function lookupTarget(target: string, actor: string) {
+  const response = await fetch('/api/v1/lookup', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ target, actor }),
+  })
+  if (!response.ok) {
+    let detail: unknown = response.statusText
+    try { detail = (await response.json()).detail } catch { /* keep status */ }
+    const message = typeof detail === 'string'
+      ? detail
+      : (detail as { error?: string })?.error ?? response.statusText
+    throw new ApiError(response.status, message)
+  }
+  return response.json() as Promise<LookupResult>
+}
+
+export const lookupSources = () => get<SourceCatalogue>('/lookup/sources')
