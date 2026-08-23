@@ -413,6 +413,64 @@ def _register_takeover(application: FastAPI) -> bool:
 TAKEOVER_ROUTE_REGISTERED = _register_takeover(app)
 
 
+@app.get("/api/v1/accuracy", tags=["accuracy"])
+def accuracy(model_version: str = Query("teps-1.0.0")) -> Dict[str, Any]:
+    """This product's own track record, published as-is.
+
+    THE POINT OF THE PRODUCT, not a diagnostic. A predictive tool that never
+    measures its predictions is marketing, and the competitor's evidence page
+    has been frozen since 2021. So this route exists from the first release, it
+    is served whether the numbers flatter the product or not, and it refuses to
+    show a figure it cannot support.
+
+    It publishes NOTHING until 30 forecasts have resolved. A Brier score over a
+    handful of outcomes is noise wearing the costume of a measurement, and
+    spending credibility on an early number would defeat the whole exercise.
+    """
+    from core import backtest
+    from core.forecast_store import open_forecast_store
+    from core.store import StoreUnavailable
+    try:
+        store = open_forecast_store()
+    except StoreUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return backtest.score(store.all_forecasts(), model_version).to_dict()
+
+
+@app.get("/api/v1/accuracy/method", tags=["accuracy"])
+def accuracy_method() -> Dict[str, Any]:
+    """How the score is computed, and what it cannot measure.
+
+    Served rather than written into the console, so the method and the figure
+    cannot drift apart — and so a reader can check the arithmetic against the
+    numbers on the same screen.
+    """
+    from core import backtest
+    from core.forecast import BAND_PROBABILITY, OBSERVATION_WINDOW_DAYS
+    return {
+        "band_probabilities": BAND_PROBABILITY,
+        "observation_window_days": OBSERVATION_WINDOW_DAYS,
+        "minimum_resolved_to_publish": backtest.MIN_RESOLVED_TO_PUBLISH,
+        "uninformative_brier": backtest.UNINFORMATIVE_BRIER,
+        "lead_time": backtest.LEAD_TIME_UNMEASURABLE,
+        "notes": [
+            "A Brier score alone means nothing. Always predicting the base rate "
+            "scores well on a rare event without containing any information, so "
+            "every figure ships with a climatology reference and a skill score.",
+            "Skill is measured against climatology. Positive means the model "
+            "knows something the base rate does not; zero or negative means it "
+            "does not, and that is published rather than buried.",
+            "Band probabilities are crude and expert-set on purpose. The point "
+            "of the record is that they become measurable and therefore "
+            "improvable — a model nobody wrote down cannot be shown wrong.",
+            "An EPSS crossing resolves a forecast only if the score was BELOW "
+            "the threshold when the forecast was issued. Measured: 80 of 128 "
+            "forecasts already sat above it, and resolving on the level would "
+            "have validated the model against its own input.",
+        ],
+    }
+
+
 # ---------------------------------------------------------------------------
 # The console.
 #
