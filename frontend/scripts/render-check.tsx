@@ -10,6 +10,7 @@ import { renderToString } from 'react-dom/server'
 import { AccuracyPanel } from '../src/components/AccuracyPanel'
 import { BrandPanel } from '../src/components/BrandPanel'
 import { ExecutivePanel } from '../src/components/ExecutivePanel'
+import { GraphPanel } from '../src/components/GraphPanel'
 import { LookupPanel } from '../src/components/LookupPanel'
 import { OperationsPanel } from '../src/components/OperationsPanel'
 import { SupplierPanel } from '../src/components/SupplierPanel'
@@ -73,6 +74,7 @@ async function main() {
     ['Suppliers', () => <SupplierPanel register={suppliers} />],
     ['Lookup (idle)', () => <LookupPanel actor="render-check" />],
     ['Brand (idle)', () => <BrandPanel actor="render-check" />],
+    ['Graph (loading)', () => <GraphPanel />],
     ['Suppliers (null)', () => <SupplierPanel register={null} />],
     ['Executive', () => <ExecutivePanel runs={runs?.runs ?? []} accuracy={accuracy}
                                         crosshair={crosshair} suppliers={suppliers}

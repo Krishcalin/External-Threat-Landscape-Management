@@ -1401,6 +1401,52 @@ def secrets_scanning() -> Dict[str, Any]:
     }
 
 
+@app.get("/api/v1/graph", tags=["graph"])
+def exposure_graph(limit: int = Query(300, ge=1, le=500),
+                   run: Optional[int] = None) -> Dict[str, Any]:
+    """The exposure graph: asset -> product -> exploited vulnerability.
+
+    NOT A TRAFFIC GRAPH, and it says so in the payload. This product has never
+    seen a packet of the customer's traffic, so throughput and flows would be
+    drawn from nothing.
+
+    THE UNEXPLAINED-EXPOSURE EDGE HAS THREE STATES, not two. Drawn; absent
+    because a cloud model was ingested and disagrees with nothing; or UNDRAWABLE
+    because no cloud model was ingested at all. The third is the common case and
+    collapsing it into the second would render a missing input as a clean
+    result.
+    """
+    from core import graph as _graph
+
+    store = _findings_store()
+    rows = store.findings(run_id=run, limit=limit)
+
+    # Whether a cloud model was ingested is read from the FINDINGS, not from a
+    # flag somebody could set independently: a reconciliation value exists only
+    # when an OverWatch export was actually joined against this run.
+    reconciled = [r for r in rows if r.get("reconciliation")]
+    cloud_model = True if reconciled else None
+
+    built = _graph.build(rows, cloud_model=cloud_model, limit=limit)
+    payload = built.to_dict()
+    payload["findings_drawn"] = len(rows)
+    payload["truncated"] = len(rows) >= limit
+    # Advisories beyond the exploited catalogue, kept STRUCTURALLY apart. They
+    # are a different type, not a flag on a finding — see core/coverage.py. The
+    # graph reports the count and refuses to draw them as exposures.
+    payload["beyond_catalogue"] = {
+        "advisories": 0,
+        "note": (
+            "Vulnerabilities beyond the exploited catalogue are held in a "
+            "different type on purpose (core/coverage.py): OSV and EUVD carry "
+            "hundreds of thousands of advisories with no exploitation filter, "
+            "and blending them into this graph would turn a short defensible "
+            "worklist into a vulnerability scanner, quietly and in one merge. "
+            "No advisory source is configured, so none were fetched."),
+    }
+    return payload
+
+
 @app.get("/api/v1/compliance/controls", tags=["compliance"])
 def compliance_controls(framework: Optional[str] = None) -> Dict[str, Any]:
     """Which controls this product helps evidence, and what it does not do.

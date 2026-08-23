@@ -1,7 +1,7 @@
 import type { Accuracy, AlertsView, CertInStatus, CiiRegister,
               ControlMapping, CrosshairView, DnsRunsPage, FindingsPage,
               ChangesView, IntelStatus, LatencyReport, RunsPage, Summary,
-              BreachReport, LookalikeReport,
+              BreachReport, ExposureGraph, LookalikeReport,
               LookupResult, SourceCatalogue,
               SupplierRegister, Tenancy } from './types'
 
@@ -139,3 +139,7 @@ export const accountBreaches = (address: string, actor: string) =>
 export const secretsScanning = () =>
   get<{ supported: boolean; reason: string; integration: string;
         what_skopos_does_contribute: string }>('/identity/secrets-scanning')
+
+/** The exposure graph. Read-only: it draws what the last scan already computed
+ *  and triggers no collection of its own. */
+export const exposureGraph = () => get<ExposureGraph>('/graph?limit=300')

@@ -16,6 +16,7 @@ import type { Accuracy, AlertsView, CertInStatus, CiiRegister, ControlMapping,
 import { AccuracyPanel } from './components/AccuracyPanel'
 import { BrandPanel } from './components/BrandPanel'
 import { ExecutivePanel } from './components/ExecutivePanel'
+import { GraphPanel } from './components/GraphPanel'
 import { LookupPanel } from './components/LookupPanel'
 import { OperationsPanel } from './components/OperationsPanel'
 import { SupplierPanel } from './components/SupplierPanel'
@@ -49,8 +50,8 @@ import { TepsBar } from './components/TepsBar'
  */
 
 type Section = 'worklist' | 'operations' | 'executive' | 'crosshair'
-  | 'lookup' | 'brand' | 'suppliers' | 'compliance' | 'accuracy' | 'alerts'
-  | 'system'
+  | 'graph' | 'lookup' | 'brand' | 'suppliers' | 'compliance'
+  | 'accuracy' | 'alerts' | 'system'
 
 /** Worklist first because it is what somebody opens the console to do; System
  *  last because it answers a question asked once per deployment. */
@@ -61,6 +62,7 @@ const SECTIONS: { id: Section; label: string }[] = [
   { id: 'operations', label: 'Operations' },
   { id: 'executive', label: 'Executive' },
   { id: 'crosshair', label: 'Crosshair' },
+  { id: 'graph', label: 'Graph' },
   // Adjacent to Suppliers: both ask what the outside world can see about
   // somebody else, and both are passive because they structurally must be.
   { id: 'lookup', label: 'Lookup' },
@@ -329,6 +331,8 @@ export function App() {
           <ExecutivePanel runs={runs} accuracy={accuracy} crosshair={crosshair}
                           suppliers={supplierRegister} summary={summary} />
         )}
+
+        {section === 'graph' && <GraphPanel />}
 
         {section === 'lookup' && (
           <LookupPanel actor={session?.username ?? 'console'} />

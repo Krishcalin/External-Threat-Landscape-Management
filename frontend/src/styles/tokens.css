@@ -470,3 +470,32 @@ tbody tr:hover { background: var(--panel2); }
 .lookup-input:focus-visible { border-color: var(--accent); }
 .lookup-h3 { font-size: 14px; font-weight: 650; margin: 0 0 var(--space-2); }
 .chip-wrap { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ── the exposure graph ────────────────────────────────────────────────────
+   Layered, not force-directed. A physics layout lands nodes somewhere different
+   every load, so nobody builds a memory of where anything is — and this data is
+   inherently layered anyway. */
+.graph-frame {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  overflow: auto; max-height: 70vh;
+}
+.graph-svg { display: block; width: 100%; min-width: 1180px; }
+.graph-col-title {
+  font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; fill: var(--ink3);
+}
+.graph-node { cursor: pointer; }
+.graph-node-box { fill: var(--panel2); stroke: var(--line); stroke-width: 1; }
+.graph-node:hover .graph-node-box { stroke: var(--accent); }
+/* Gaps are visually distinct from findings: they are not things that exist in
+   the estate, they are things this product could not see. */
+.graph-gap-box {
+  fill: var(--medbg); stroke: var(--med); stroke-width: 1; stroke-dasharray: 3 2;
+}
+.graph-label { font-size: 11px; fill: var(--ink); font-family: var(--font-mono); }
+.graph-gap-label { font-size: 11px; fill: var(--med); font-weight: 600; }
+.graph-legend {
+  display: flex; flex-wrap: wrap; gap: var(--space-4);
+  font-size: 11px; color: var(--ink2); align-items: center;
+}

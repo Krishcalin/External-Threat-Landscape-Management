@@ -565,3 +565,43 @@ export interface BreachReport {
   caveat: string | null
   what_this_does_not_say: string
 }
+
+/* ── the exposure graph ────────────────────────────────────────────────────
+ * No traffic, no flows, no throughput: this product has never seen a packet of
+ * the customer's traffic. `unexplained_state` has THREE values — a missing
+ * cloud model is `undrawable`, not `absent`. */
+
+export interface GraphNode {
+  id: string
+  kind: 'asset' | 'product' | 'vulnerability' | 'gap'
+  label: string
+  detail: string
+  band: string
+  count: number
+}
+
+export interface GraphEdge {
+  source: string
+  target: string
+  kind: string
+  detail: string
+  meaning: string
+}
+
+export interface ExposureGraph {
+  headline: string
+  nodes: GraphNode[]
+  /** Pre-sorted by weight server-side, so the unexplained edge draws last. */
+  edges: GraphEdge[]
+  gaps: Record<string, number>
+  node_meaning: Record<string, string>
+  edge_meaning: Record<string, string>
+  cloud_model: boolean | null
+  unexplained_state: 'present' | 'absent' | 'undrawable'
+  unexplained_note: string
+  not_a_traffic_graph: string
+  sparse_is_not_safe: string
+  findings_drawn: number
+  truncated: boolean
+  beyond_catalogue: { advisories: number; note: string }
+}
