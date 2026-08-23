@@ -27,7 +27,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from core import engine, intel, inventory, match, scoring
+from core import engine, intel, inventory, match, scoring, tenancy
 from core.overwatch import load as load_overwatch
 from core.store import StoreUnavailable
 
@@ -221,6 +221,21 @@ def execute(inventory_path: str,
     # scan result is not where somebody reads a ticket.
     itsm_report.pop("tickets", None)
 
+    # The OpenCTI push, decided here for the same reason ticketing is: the
+    # route and the scheduler both call this function, so neither can develop
+    # its own opinion about when an estate gets transmitted.
+    #
+    # Pushed from `diff.new` rather than every finding, so a stable estate does
+    # not re-send its whole surface on every run. STIX ids are deterministic so
+    # a consumer would upsert rather than duplicate — but transmitting the same
+    # bundle nightly is still traffic nobody asked for.
+    from collect import opencti as _opencti
+    try:
+        opencti_report = _opencti.push_for_run(diff.new, org=tenancy.current_org())
+    except Exception as exc:                                   # noqa: BLE001
+        opencti_report = {"decided": None, "pushed": False,
+                          "reason": f"push failed: {type(exc).__name__}: {exc}"}
+
     return {
         "run": run_id,
         "scanned_at": date.today().isoformat(),
@@ -241,6 +256,10 @@ def execute(inventory_path: str,
         # the outside is indistinguishable from a quiet run.
         "alerting": alerting_report,
         "ticketing": itsm_report,
+        # Same contract as the two above: always present, always says which of
+        # the four states this run was in — including "switched on with nothing
+        # configured", which from outside is indistinguishable from silence.
+        "opencti": opencti_report,
         "since_last_run": {
             "previous_run": diff.previous_run,
             "headline": diff.headline(),

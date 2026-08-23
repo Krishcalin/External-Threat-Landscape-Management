@@ -161,13 +161,32 @@ def test_the_caveat_travels_inside_the_bundle(client):
 
 
 def test_a_worklist_entry_exports_at_worklist_confidence(client):
+    """The FINDING relationships, not the structural ones.
+
+    P8 added `consists-of` (an asset composed of its observables) and
+    `belongs-to` (the ownership edge). Neither carries a confidence, because
+    neither is a claim about a vulnerability — putting a number on them would
+    be inventing one. This assertion narrowed from "every relationship" to the
+    two types that express a finding, which is what it always meant.
+    """
     from core import stix
     payload = client.get("/api/v1/export/stix").json()
-    relationships = [o for o in payload["bundle"]["objects"]
-                     if o["type"] == "relationship"]
-    assert relationships
+    findings = [o for o in payload["bundle"]["objects"]
+                if o["type"] == "relationship"
+                and o.get("relationship_type") in {"has", "related-to"}]
+    assert findings
     assert all(r["confidence"] == stix.CONFIDENCE_WORKLIST
-               for r in relationships), "a product match is not a determination"
+               for r in findings), "a product match is not a determination"
+
+
+def test_structural_relationships_carry_no_invented_confidence(client):
+    """`consists-of` and `belongs-to` state composition and ownership, not
+    likelihood. A confidence on either would be a number nothing computed."""
+    payload = client.get("/api/v1/export/stix").json()
+    structural = [o for o in payload["bundle"]["objects"]
+                  if o["type"] == "relationship"
+                  and o.get("relationship_type") in {"consists-of", "belongs-to"}]
+    assert all("confidence" not in r for r in structural)
 
 
 def test_truncation_is_declared(client):

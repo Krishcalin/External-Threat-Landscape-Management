@@ -60,7 +60,170 @@ def _id(kind: str, *parts: str) -> str:
     return f"{kind}--{uuid.uuid5(NAMESPACE, '|'.join(str(p) for p in parts))}"
 
 
+#: The STIX 2.1 namespace for Cyber Observable ids, from the specification
+#: (§1.5.1). NOT this product's own namespace: an observable's id is defined by
+#: the spec as a UUIDv5 over its ID Contributing Properties in THIS namespace,
+#: so two producers who have never met emit the same id for `example.com`.
+#:
+#: That is the whole reason to bother. A consumer merges our observable with one
+#: from a completely different source rather than accumulating near-duplicates —
+#: and OpenCTI, which computes exactly this, will upsert rather than duplicate.
+SCO_NAMESPACE = uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7")
+
+
+def _sco_id(kind: str, properties: Dict[str, Any]) -> str:
+    """A spec-conformant observable id.
+
+    The contributing properties are serialised as canonical JSON — sorted keys,
+    no whitespace — because the spec requires a deterministic byte sequence and
+    any deviation produces an id nobody else agrees with.
+    """
+    canonical = json.dumps(properties, sort_keys=True, separators=(",", ":"))
+    return f"{kind}--{uuid.uuid5(SCO_NAMESPACE, canonical)}"
+
+
+def domain_name(value: str) -> Dict[str, Any]:
+    """A hostname as `domain-name`, deliberately not `hostname`.
+
+    OpenCTI has a `Hostname` observable and it is an OPENCTI EXTENSION, not
+    STIX 2.1. Emitting it would produce a bundle that round-trips through
+    OpenCTI and nowhere else, which defeats the point of exporting a standard.
+    Subdomains are domain names; the spec is content with that.
+    """
+    name = str(value or "").strip().lower().rstrip(".")
+    return {"type": "domain-name", "spec_version": SPEC_VERSION,
+            "id": _sco_id("domain-name", {"value": name}), "value": name}
+
+
+def ip_address(value: str) -> Optional[Dict[str, Any]]:
+    """`ipv4-addr` or `ipv6-addr`, or None if it is neither."""
+    import ipaddress as _ip
+    try:
+        parsed = _ip.ip_address(str(value or "").strip())
+    except ValueError:
+        return None
+    kind = "ipv4-addr" if parsed.version == 4 else "ipv6-addr"
+    text = str(parsed)
+    return {"type": kind, "spec_version": SPEC_VERSION,
+            "id": _sco_id(kind, {"value": text}), "value": text}
+
+
+def autonomous_system(number: int, name: str = "") -> Optional[Dict[str, Any]]:
+    try:
+        asn = int(number)
+    except (TypeError, ValueError):
+        return None
+    obj = {"type": "autonomous-system", "spec_version": SPEC_VERSION,
+           "id": _sco_id("autonomous-system", {"number": asn}), "number": asn}
+    if name:
+        obj["name"] = str(name)
+    return obj
+
+
+def software(product: str, version: str = "", vendor: str = "",
+             cpe: str = "") -> Optional[Dict[str, Any]]:
+    """A `software` observable, and the one place a version legitimately goes.
+
+    `core/identity.py` refuses to let an OBSERVED version reach the field a
+    published affected range is evaluated against. This is not that field — it
+    records what the asset appeared to be running, which is exactly what a
+    `software` observable is for. The determination still lives in the
+    relationship's confidence, where a consumer can see the basis.
+    """
+    name = str(product or "").strip()
+    if not name:
+        return None
+    # Only the properties actually present contribute to the id, per the spec.
+    contributing: Dict[str, Any] = {"name": name}
+    if cpe:
+        contributing["cpe"] = str(cpe)
+    if vendor:
+        contributing["vendor"] = str(vendor)
+    if version:
+        contributing["version"] = str(version)
+    obj = {"type": "software", "spec_version": SPEC_VERSION,
+           "id": _sco_id("software", contributing), "name": name}
+    for key in ("cpe", "vendor", "version"):
+        value = contributing.get(key)
+        if value:
+            obj[key] = value
+    return obj
+
+
+def x509_certificate(serial: str, issuer: str = "", not_before: str = "",
+                     not_after: str = "") -> Optional[Dict[str, Any]]:
+    serial_number = str(serial or "").strip()
+    if not serial_number:
+        return None
+    obj = {"type": "x509-certificate", "spec_version": SPEC_VERSION,
+           "id": _sco_id("x509-certificate", {"serial_number": serial_number}),
+           "serial_number": serial_number}
+    if issuer:
+        obj["issuer"] = str(issuer)
+    if not_before:
+        obj["validity_not_before"] = f"{str(not_before)[:10]}T00:00:00.000Z"
+    if not_after:
+        obj["validity_not_after"] = f"{str(not_after)[:10]}T00:00:00.000Z"
+    return obj
+
+
+def organization(name: str, created: Optional[str] = None) -> Dict[str, Any]:
+    """The identity an asset BELONGS TO — the ownership edge's far end.
+
+    This is the object that carries the one thing no other producer in this
+    ecosystem has: a record that somebody proved they control the asset. It is
+    an `identity` with `identity_class: organization`, which is the ordinary
+    STIX way to say so.
+    """
+    label = str(name or "").strip() or "unattributed"
+    return {"type": "identity", "spec_version": SPEC_VERSION,
+            "id": _id("identity", "organization", label.lower()),
+            "created": created or _now(), "modified": created or _now(),
+            "name": label, "identity_class": "organization"}
+
+
+def composed_of(infrastructure_id: str, observable_id: str,
+                created: Optional[str] = None) -> Dict[str, Any]:
+    """`infrastructure --consists-of--> observable`.
+
+    A built-in STIX 2.1 relationship, which matters: the `System`-identity
+    alternative some connectors use has no way to compose an asset from
+    observables at all, and its vulnerability edge is an OpenCTI extension
+    rather than real STIX.
+    """
+    return {
+        "type": "relationship", "spec_version": SPEC_VERSION,
+        "id": _id("relationship", "consists-of", infrastructure_id, observable_id),
+        "created": created or _now(), "modified": created or _now(),
+        "relationship_type": "consists-of",
+        "source_ref": infrastructure_id, "target_ref": observable_id,
+    }
+
+
+def belongs_to(infrastructure_id: str, identity_id: str,
+               verified_on: str = "", created: Optional[str] = None
+               ) -> Dict[str, Any]:
+    """`infrastructure --belongs-to--> identity`. THE OWNERSHIP EDGE.
+
+    Carries the verification date in its description rather than asserting
+    ownership bare, because an ownership record has an expiry — `core/ownership.py`
+    gives them 180 days — and an edge with no date would outlive the proof.
+    """
+    detail = ("Ownership of this asset was verified by the operator"
+              + (f" on {verified_on[:10]}." if verified_on else ".")
+              + " SKOPOS records the verification; it does not adjudicate it.")
+    return {
+        "type": "relationship", "spec_version": SPEC_VERSION,
+        "id": _id("relationship", "belongs-to", infrastructure_id, identity_id),
+        "created": created or _now(), "modified": created or _now(),
+        "relationship_type": "belongs-to",
+        "source_ref": infrastructure_id, "target_ref": identity_id,
+        "description": detail,
+    }
+
+
 def vulnerability(cve: str, name: str = "", description: str = "",
+
                   created: Optional[str] = None) -> Dict[str, Any]:
     return {
         "type": "vulnerability",
@@ -80,11 +243,20 @@ def vulnerability(cve: str, name: str = "", description: str = "",
 
 
 def infrastructure(asset: str, product: str = "",
-                   created: Optional[str] = None) -> Dict[str, Any]:
+                   created: Optional[str] = None,
+                   org: str = "") -> Dict[str, Any]:
+    """An asset. The id is NAMESPACED BY ORGANISATION, deliberately.
+
+    OpenCTI computes an Infrastructure's deterministic id from the lowercased
+    NAME ALONE. Two tenants that both run `vpn.internal` would therefore
+    collide inside a consumer that ingests from both — one estate's finding
+    silently attaching to another's asset. Including the org in the id material
+    costs nothing and makes that impossible.
+    """
     return {
         "type": "infrastructure",
         "spec_version": SPEC_VERSION,
-        "id": _id("infrastructure", asset),
+        "id": _id("infrastructure", org or "default", asset),
         "created": created or _now(),
         "modified": created or _now(),
         "name": asset,
@@ -201,8 +373,35 @@ def _provenance_note() -> str:
     return "\n".join(lines)
 
 
+def _observables_for(finding: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The Cyber Observables an exposure finding legitimately contains.
+
+    Only what was actually observed. A finding with no address contributes no
+    `ipv4-addr`, rather than one built from a resolution nobody performed.
+    """
+    out: List[Dict[str, Any]] = []
+    asset = str(finding.get("asset") or "").strip()
+    if asset:
+        address = ip_address(asset)
+        # An asset identifier is either a name or an address, never both.
+        out.append(address if address is not None else domain_name(asset))
+    for value in finding.get("addresses") or []:
+        address = ip_address(value)
+        if address is not None:
+            out.append(address)
+    product = str(finding.get("product") or "")
+    if product:
+        item = software(product, str(finding.get("version") or ""),
+                        str(finding.get("vendor") or ""),
+                        str(finding.get("cpe") or ""))
+        if item is not None:
+            out.append(item)
+    return out
+
+
 def bundle(findings: Iterable[Dict[str, Any]],
-           created: Optional[str] = None) -> Dict[str, Any]:
+           created: Optional[str] = None,
+           org: str = "") -> Dict[str, Any]:
     """A STIX 2.1 bundle. Deterministic, so re-exporting deduplicates."""
     stamp = created or _now()
     objects: List[Dict[str, Any]] = []
@@ -218,9 +417,34 @@ def bundle(findings: Iterable[Dict[str, Any]],
             # the graph that corresponds to nothing.
             continue
         if ("infra", asset) not in seen:
-            objects.append(infrastructure(asset, str(finding.get("product") or ""),
-                                          stamp))
+            infra = infrastructure(asset, str(finding.get("product") or ""),
+                                   stamp, org=org)
+            objects.append(infra)
             seen.add(("infra", asset))
+
+            # OBSERVABLES. The asset's name and address as first-class STIX
+            # Cyber Observables, composed onto the infrastructure. This is what
+            # makes the bundle worth ingesting rather than merely valid: a
+            # consumer can pivot on `example.com` across every source it holds,
+            # which an infrastructure object alone does not permit.
+            for observable in _observables_for(finding):
+                if ("sco", observable["id"]) not in seen:
+                    objects.append(observable)
+                    seen.add(("sco", observable["id"]))
+                objects.append(composed_of(infra["id"], observable["id"], stamp))
+
+            # THE OWNERSHIP EDGE, emitted only where ownership was actually
+            # verified. An unconditional edge would assert control this product
+            # never established, which is the one claim it exists to be careful
+            # about.
+            verified = str(finding.get("ownership_verified_on") or "")
+            if org and verified:
+                identity = organization(org, stamp)
+                if ("org", identity["id"]) not in seen:
+                    objects.append(identity)
+                    seen.add(("org", identity["id"]))
+                objects.append(belongs_to(infra["id"], identity["id"],
+                                          verified, stamp))
         if ("vuln", cve) not in seen:
             objects.append(vulnerability(cve, str(finding.get("vulnerability") or ""),
                                          str(finding.get("required_action") or ""),

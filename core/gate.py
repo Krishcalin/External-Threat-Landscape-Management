@@ -152,6 +152,15 @@ OPERATIONS: Dict[str, Exposure] = {
     # in the environment and must be https, and that no HTTP route can
     # trigger it.
     "ticket_create": Exposure.PASSIVE,
+    # Pushing a STIX bundle into a threat-intelligence platform. PASSIVE by the
+    # same reasoning as ticket_create and alert_dispatch — no packet reaches
+    # anybody's estate — and constrained the same way: the destination comes
+    # from the environment, must be https, and no HTTP route can trigger it.
+    #
+    # Worth being precise about what it IS, though: an outbound description of
+    # where an estate is weak. Passive is a statement about who gets touched,
+    # not about how sensitive the payload is.
+    "intel_push": Exposure.PASSIVE,
     # Querying a public vulnerability database. Emits nothing toward the
     # customer's estate, so PASSIVE — and registered so a lookup appears in the
     # audit log like every other outbound call.

@@ -79,6 +79,13 @@ services:
       # operator that SKOPOS must not assume. Unset, the source is inert and a
       # lookup says so. See collect/internetdb.py.
       SKOPOS_INTERNETDB_ACK: ${SKOPOS_INTERNETDB_ACK:-}
+      # Pushing findings into OpenCTI. OFF unless SKOPOS_OPENCTI_ON_SCAN is
+      # set: a scan describes your estate to you, this describes it to a system
+      # somebody administers, and the second needs its own consent.
+      SKOPOS_OPENCTI_ON_SCAN: ${SKOPOS_OPENCTI_ON_SCAN:-}
+      SKOPOS_OPENCTI_URL: ${SKOPOS_OPENCTI_URL:-}
+      SKOPOS_OPENCTI_TOKEN: ${SKOPOS_OPENCTI_TOKEN:-}
+      SKOPOS_OPENCTI_COLLECTION: ${SKOPOS_OPENCTI_COLLECTION:-}
       SKOPOS_CONSOLE_DIR: /app/frontend/dist
       # Unset by default, and that is the safe state: without it the takeover
       # route and the TAXII server are NOT REGISTERED AT ALL. Both serve
