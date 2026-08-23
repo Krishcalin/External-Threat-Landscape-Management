@@ -166,10 +166,18 @@ def _diff(before: Sequence[Dict[str, Any]], after: Sequence[Dict[str, Any]],
 
 
 class PostgresFindingsStore:
-    def __init__(self, dsn: Optional[str] = None) -> None:
+    def __init__(self, dsn: Optional[str] = None, migrate: bool = True) -> None:
         self._dsn = dsn or os.environ.get("SKOPOS_DATABASE_URL")
         if not self._dsn:
             raise StoreUnavailable("SKOPOS_DATABASE_URL is not set")
+        if migrate:
+            # Every store migrates, not just core/store.py. See
+            # migrate.ensure_once for the deployment this was measured breaking.
+            from core import migrate as _migrate
+            try:
+                _migrate.ensure_once(self._dsn)
+            except _migrate.MigrationError as exc:
+                raise StoreUnavailable(str(exc)) from exc
 
     def _connect(self):
         import psycopg

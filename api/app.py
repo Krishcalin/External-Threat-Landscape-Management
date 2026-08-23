@@ -33,6 +33,7 @@ from fastapi.staticfiles import StaticFiles                # noqa: E402
 from core import engine, intel, inventory, match, scoring  # noqa: E402
 from core.overwatch import (RECONCILIATION_MEANING, load as load_overwatch,
                             parse_graph)                   # noqa: E402
+from core.store import StoreUnavailable                    # noqa: E402
 
 app = FastAPI(
     title="SKOPOS",
@@ -209,6 +210,29 @@ def run_scan(inventory_path: str = Query(..., description="CSV or JSON asset inv
         assets_unmatched=unmatched, summary=summary_payload,
         findings=[f.to_dict() for f in ranked])
 
+    # THE FORECAST RECORD. Every finding is a prediction, and this is the only
+    # moment its inputs exist — the corpus moves, EPSS moves, the model version
+    # changes. Writing it later is not an option: a Brier score needs RESOLVED
+    # forecasts, resolution takes calendar time, and history cannot be
+    # backfilled.
+    #
+    # This module and its schema were built and left unwired, and five scans
+    # completed before anybody noticed. Those five runs are evidence that can
+    # never be recovered, which is exactly the failure the workstream was
+    # sequenced first to avoid.
+    forecasts_written = 0
+    try:
+        from core import forecast as _forecast
+        from core.forecast_store import open_forecast_store
+        forecasts_written = open_forecast_store().record(
+            [_forecast.from_finding(f) for f in ranked], run_id=run_id)
+    except StoreUnavailable as exc:
+        # Reported, never silent. A scan that completes while the record is not
+        # accumulating looks identical to one that is, and the difference is
+        # only visible months later when there is nothing to score.
+        forecasts_written = -1
+        _log_forecast_failure = str(exc)
+
     diff = store.diff_against_previous(run_id)
     return {
         "run": run_id,
@@ -218,6 +242,10 @@ def run_scan(inventory_path: str = Query(..., description="CSV or JSON asset inv
         "rows_rejected": len(rejected),
         "summary": summary_payload,
         "unmappable_cloud_resources": unmappable,
+        # Surfaced on every scan. If this is ever 0 or -1 the accuracy record is
+        # not accumulating, and that must be visible now rather than discovered
+        # when somebody asks for a Brier score.
+        "forecasts_recorded": forecasts_written,
         # What is NEW since last time is most of why a monitoring product is
         # worth running continuously rather than once. It was not merely
         # unbuilt before persistence — it was impossible.

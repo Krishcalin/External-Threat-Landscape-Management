@@ -154,3 +154,38 @@ def require_current(dsn: Optional[str] = None,
             f"The code expects controls those files create — running anyway "
             f"would mean claiming constraints that are not there. "
             f"Apply them with core.migrate.ensure_current().")
+
+
+#: DSNs already brought up to date in this process. Migrating is idempotent but
+#: not free — it opens a connection and reads a table — and a store that
+#: migrated on every construction would do it once per request.
+_ENSURED: set = set()
+
+
+def ensure_once(dsn: Optional[str] = None,
+                directory: Optional[Path] = None) -> None:
+    """Bring the schema up to date, at most once per DSN per process.
+
+    EVERY STORE CALLS THIS, and that is the point. `ensure_current` used to live
+    only in `PostgresStore.__init__`, so a deployment whose traffic went through
+    the findings store — which is to say, one that only ever scanned — never
+    migrated at all. Measured on the running stack: db/004 sat unapplied while
+    five scans completed, and the forecast table the phase depends on did not
+    exist.
+
+    A schema check that lives on one code path is a schema check that holds for
+    exactly that code path.
+    """
+    target = dsn or os.environ.get("SKOPOS_DATABASE_URL")
+    if not target or target in _ENSURED:
+        return
+    ensure_current(target, directory)
+    _ENSURED.add(target)
+
+
+def forget(dsn: Optional[str] = None) -> None:
+    """Drop the memo. For tests that build throwaway databases."""
+    if dsn is None:
+        _ENSURED.clear()
+    else:
+        _ENSURED.discard(dsn)
