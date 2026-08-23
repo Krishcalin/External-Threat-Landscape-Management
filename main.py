@@ -244,6 +244,25 @@ def cmd_discover(args) -> int:
         if len(result.excluded) > 10:
             print(f"  ... {len(result.excluded) - 10} more")
 
+    # THE TRIAGE QUEUE. `merge()` already resolved every name against scope and
+    # recorded UNSCOPED for the ones that are neither included nor excluded —
+    # the state where shadow IT and forgotten subsidiaries actually live. Until
+    # now that distinction was computed and then discarded when the inventory
+    # was written.
+    from core import candidates as _candidates
+    pending = _candidates.from_discovery(result.names)
+    if pending:
+        print(f"\n{len(pending)} name(s) are NOT in scope and NOT excluded — "
+              f"nobody has decided whether they are yours:")
+        for candidate in pending[:10]:
+            print(f"  {candidate.name}  (first seen {candidate.first_seen}, "
+                  f"via {candidate.source})")
+        if len(pending) > 10:
+            print(f"  ... {len(pending) - 10} more")
+        print("  Decide with: skopos candidates claim|disown|defer <name>")
+        store.append_audit(args.actor, "candidates.discovered",
+                           {"apex": args.domain, "count": len(pending)})
+
     if result.blackout:
         raise discovery_run.DiscoveryUnavailable(result.coverage_note(scope))
 

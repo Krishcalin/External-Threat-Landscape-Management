@@ -284,6 +284,23 @@ class Lookup:
     #: result that omits Shodan without saying so reads as "no open ports".
     unavailable: List[Dict[str, str]] = field(default_factory=list)
     reports: List[Any] = field(default_factory=list)
+    #: Vendored abuse-feed membership, from `core/blocklists.py`. Empty is not
+    #: "clean" — `abuse_coverage` carries the sentence that says so, and the
+    #: two travel together for exactly that reason.
+    abuse: List[Dict[str, Any]] = field(default_factory=list)
+    abuse_coverage: Dict[str, Any] = field(default_factory=dict)
+    #: Ransomware leak-site listings matching this target, from
+    #: `collect/leaksites.py`. A CLAIM BY A GROUP, never a confirmed breach.
+    leak_listings: List[Dict[str, Any]] = field(default_factory=list)
+    leak_coverage: Dict[str, Any] = field(default_factory=dict)
+    #: Certificate posture from the SAME CT read discovery already performs —
+    #: the fields `from_certspotter` discards. See collect/ct.py.
+    certificates: List[Dict[str, Any]] = field(default_factory=list)
+    certificate_lineage: Dict[str, Any] = field(default_factory=dict)
+    certificate_coverage: Dict[str, Any] = field(default_factory=dict)
+    #: Organisation names a CA validated on certificates for this target.
+    #: QUESTIONS for the triage queue, never additions to scope.
+    subsidiary_candidates: List[Dict[str, Any]] = field(default_factory=list)
 
     def score(self) -> Score:
         result = Score()
@@ -325,8 +342,35 @@ class Lookup:
                 f"{key}: {value}" for key, value in self.registration.items()
                 if key != "raw"]
 
+        # REPUTATION — what third-party feeds say. The socket was declared in
+        # P7 and stood empty until the vendored abuse corpus arrived.
+        #
+        # SCORED ONLY WHEN THE CORPUS WAS ACTUALLY CONSULTED. `abuse_coverage`
+        # is populated whether or not anything matched, so its presence is the
+        # signal that a check happened; scoring 0.0 on an absent corpus would
+        # turn "we never looked" into "nothing was found", which is the one
+        # translation this whole module exists to prevent.
+        if self.abuse_coverage:
+            # NEUTRAL listings do not count. A Tor exit relay is context about
+            # where traffic came from, and scoring it as reputation would make
+            # running one look like misconduct.
+            adverse = [h for h in self.abuse if h.get("sense") == "ABUSE"]
+            if adverse:
+                # Deliberately not a count-based ramp. Appearing on one abuse
+                # feed and appearing on four are not four times as meaningful —
+                # the feeds overlap heavily and share upstream reporters.
+                result.factors[Factor.REPUTATION.value] = 0.0
+                result.inputs[Factor.REPUTATION.value] = [
+                    f"{h['feed']} ({h['publisher']}), data {h['data_age_days']}"
+                    f" day(s) old: {h['means']}" for h in adverse[:6]]
+            else:
+                result.factors[Factor.REPUTATION.value] = 1.0
+                result.inputs[Factor.REPUTATION.value] = [
+                    self.abuse_coverage.get("absence_means", "")]
+
         # REPUTATION stays None whenever no source could answer, which is the
-        # normal case without a key. It is never scored as zero.
+        # normal case without a key and without a vendored corpus. It is never
+        # scored as zero for want of looking.
         return result
 
     def headline(self) -> str:
@@ -335,6 +379,15 @@ class Lookup:
             parts.append(f"{len(self.names)} name(s) seen publicly")
         if self.reverse_dns:
             parts.append(f"{len(self.reverse_dns)} address(es) with a PTR")
+        adverse = [h for h in self.abuse if h.get("sense") == "ABUSE"]
+        if adverse:
+            parts.append(f"on {len(adverse)} abuse feed(s)")
+        if self.leak_listings:
+            # Named in the headline because it is the highest-signal thing this
+            # product can observe, and burying it below a port list would be a
+            # ranking decision nobody made deliberately.
+            parts.append(f"{len(self.leak_listings)} ransomware leak-site "
+                         f"listing(s)")
         if self.unavailable:
             parts.append(f"{len(self.unavailable)} source(s) unavailable")
         return "; ".join(parts) + "."
@@ -352,6 +405,17 @@ class Lookup:
             # does not know, and a reader who cannot see the list will read the
             # result as complete.
             "unavailable_sources": list(self.unavailable),
+            # Vendored corpora. Both carry their coverage alongside their hits,
+            # because in both cases an empty list is the overwhelmingly common
+            # result and means almost nothing on its own.
+            "abuse": list(self.abuse),
+            "abuse_coverage": dict(self.abuse_coverage),
+            "leak_listings": list(self.leak_listings),
+            "leak_coverage": dict(self.leak_coverage),
+            "certificates": list(self.certificates),
+            "certificate_lineage": dict(self.certificate_lineage),
+            "certificate_coverage": dict(self.certificate_coverage),
+            "subsidiary_candidates": list(self.subsidiary_candidates),
             "passive_only": PASSIVE_ONLY,
         }
 

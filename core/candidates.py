@@ -111,6 +111,49 @@ class Candidate:
         }
 
 
+def from_discovery(names: Sequence[Any], today: Optional[date] = None
+                   ) -> List[Candidate]:
+    """Discovery output to triage-queue candidates.
+
+    THE STATE DISCOVERY ALREADY COMPUTES AND THEN THROWS AWAY. `merge()` in
+    `collect/discovery.py` resolves every name against scope and records
+    `Decision.UNSCOPED` for the ones that are neither included nor excluded —
+    then `to_inventory_rows` writes them all out identically and the
+    distinction is gone.
+
+    UNSCOPED is precisely the triage state: found, not claimed, not disowned.
+    Nobody has decided. This turns that into a row.
+
+    Wildcards are skipped for the same reason `to_inventory_rows` skips them: a
+    wildcard certificate proves a certificate exists, never that a host does,
+    and asking somebody to decide about `*.example.com` is asking about a
+    pattern rather than an asset.
+    """
+    from core.scope import Decision as _Decision
+
+    stamp = (today or datetime.now(timezone.utc).date()).isoformat()
+    out: List[Candidate] = []
+    for found in names:
+        if getattr(found, "is_wildcard", False):
+            continue
+        if getattr(found, "decision", None) is not _Decision.UNSCOPED:
+            continue
+        # The earliest date any source saw it, where a source dated its
+        # sighting. A candidate ages from when it was FIRST seen, not from when
+        # this queue happened to notice it — otherwise re-running discovery
+        # resets every clock and nothing is ever stale.
+        seen = [d for d in getattr(found, "first_seen_by", {}).values() if d]
+        first = min(seen).isoformat() if seen else stamp
+        sources = sorted(getattr(found, "sources", ()) or ["discovery"])
+        out.append(Candidate(
+            name=found.name,
+            source=", ".join(sources),
+            first_seen=first,
+            last_seen=stamp,
+            times_seen=1))
+    return sorted(out, key=lambda c: c.name)
+
+
 def check_decision(decision: str, actor: str,
                    reason: str = "") -> Decision:
     """Validate a decision before the store is touched.
@@ -185,5 +228,6 @@ def stale_candidates(candidates: Sequence[Candidate],
 
 
 __all__ = ["Candidate", "Decision", "DECISION_MEANING", "CandidateRefused",
+           "from_discovery",
            "AGE_THRESHOLD_DAYS", "check_decision", "summarise",
            "stale_candidates"]

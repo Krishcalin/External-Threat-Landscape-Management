@@ -1014,6 +1014,65 @@ class _LookupBody(BaseModel):
     actor: str
 
 
+def _attach_abuse(found, target) -> None:
+    """Vendored abuse-feed membership for a lookup target.
+
+    Addresses are checked against the address and netblock feeds; a name is
+    checked against the URL feeds, which are matched on host. Both, for a
+    target that has both.
+    """
+    from core import blocklists as _bl
+    try:
+        corpus = _bl.Blocklists.load()
+    except _bl.CorpusUnavailable as exc:
+        found.unavailable.append({
+            "source": "abuse feeds",
+            "why": str(exc)[:160],
+            "cost": "membership of published abuse feeds was not checked; this "
+                    "is NOT a statement that the target is absent from them",
+            "terms": "open"})
+        return
+
+    hits = []
+    for address in list(target.addresses)[:16]:
+        hits.extend(h.to_dict() for h in corpus.check_address(address))
+    if not target.is_network:
+        hits.extend(h.to_dict() for h in corpus.check_host(target.value))
+
+    # One feed can list both an address and its name. Deduplicated on
+    # (feed, matched) so a target does not appear to be on more lists than it is.
+    seen = set()
+    for hit in hits:
+        key = (hit["feed"], hit["matched"])
+        if key in seen:
+            continue
+        seen.add(key)
+        found.abuse.append(hit)
+    found.abuse_coverage = corpus.coverage()
+
+
+def _attach_leak_listings(found, target) -> None:
+    """Ransomware leak-site listings naming this target.
+
+    Names only — a network has no company name, so a CIDR lookup skips this
+    rather than matching every listing whose domain happens to resolve nearby.
+    """
+    from collect import leaksites as _leaks
+    if target.is_network:
+        return
+    try:
+        corpus = _leaks.LeakSites.load()
+    except _leaks.CorpusUnavailable as exc:
+        found.unavailable.append({
+            "source": "ransomware leak sites",
+            "why": str(exc)[:160],
+            "cost": "public extortion-site victim indexes were not checked",
+            "terms": "open"})
+        return
+    found.leak_listings = [m.to_dict() for m in corpus.check([target.value])]
+    found.leak_coverage = corpus.coverage()
+
+
 @app.post("/api/v1/lookup", tags=["lookup"])
 def lookup_target(body: _LookupBody) -> Dict[str, Any]:
     """What the public record says about a domain, a host, an address or a /24.
@@ -1031,6 +1090,7 @@ def lookup_target(body: _LookupBody) -> Dict[str, Any]:
     from collect import ct as _ct
     from collect import lookup_scan
     from collect import takeover_scan
+    from core import certificates as _certs
     from core import gate as _gate
     from core import lookup as _lookup
     from core import suppliers as _suppliers
@@ -1077,6 +1137,20 @@ def lookup_target(body: _LookupBody) -> Dict[str, Any]:
             # (name, first_seen) tuples, not objects.
             found.names = sorted({n for n, _ in names})
             found.reports.append(report)
+
+            # The SAME log, read for the fields discovery discards. Issuer,
+            # validity window and lineage are what Recorded Future sells as
+            # historical TLS data; CT gives them away and SKOPOS was already
+            # making the call.
+            certificates, cert_report = _ct.certificates_from_certspotter(
+                target.value, permit=permit)
+            found.reports.append(cert_report)
+            if certificates:
+                found.certificates = _certs.assess(certificates)
+                found.certificate_lineage = _certs.lineage(certificates)
+                found.certificate_coverage = _certs.coverage(certificates)
+                found.subsidiary_candidates = _certs.candidate_organisations(
+                    certificates, known=[target.value])
         except Exception as exc:                                # noqa: BLE001
             # A CT failure leaves SURFACE unobserved rather than zero. Reporting
             # "0 names" for a source that errored is our outage rendered as
@@ -1099,6 +1173,14 @@ def lookup_target(body: _LookupBody) -> Dict[str, Any]:
             # negligence.
             found.registration = {"observed": False,
                                   "detail": f"{type(exc).__name__}"}
+
+    # ── the vendored corpora ────────────────────────────────────────────────
+    # No network call: both were fetched by `tools/refresh_intel.py` and are
+    # queried in process. A missing corpus is reported as UNAVAILABLE, never as
+    # an empty result — "we never built the index" and "nothing matched" are
+    # different sentences and only one of them is reassuring.
+    _attach_abuse(found, target)
+    _attach_leak_listings(found, target)
 
     # The licensed sources. Each is inert without its key and reports itself as
     # unavailable rather than absent — "we have no key" must never render as

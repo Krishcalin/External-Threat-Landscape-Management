@@ -206,6 +206,72 @@ def from_certspotter(apex: str, permit=None, budget=None, limiter=None):
                              len({n for n, _ in out}), returned)
 
 
+def certificates_from_certspotter(apex: str, permit=None, budget=None,
+                                  limiter=None):
+    """The FIELDS `from_certspotter` throws away.
+
+    Discovery needs names, so that function extracts SANs and discards issuer,
+    validity window, signature algorithm and subject organisation. Those are
+    exactly the fields Recorded Future sells as "10+ years of historical
+    SSL/TLS data" — and Certificate Transparency gives them away.
+
+    Kept as a SEPARATE call rather than widening `from_certspotter`, because
+    that function is on the discovery path where the only thing wanted is
+    names, and returning richer objects there would change a contract several
+    callers depend on for the sake of a use case none of them has.
+
+    Everything returned is `Observed.ISSUED`. A CT log records issuance; it
+    says nothing about deployment, and `core/certificates.py` carries that
+    distinction into every result.
+    """
+    from core.certificates import Certificate, Observed
+
+    url = ("https://api.certspotter.com/v1/issuances"
+           f"?domain={urllib.parse.quote(apex)}"
+           "&include_subdomains=true&expand=dns_names&expand=issuer")
+    try:
+        payload = _get(permit, url, budget, limiter)
+    except egress.PermitMismatch:
+        raise
+    except Exception as exc:                     # noqa: BLE001
+        return [], SourceReport("certspotter-certs", Outcome.FAILED, 0, 0,
+                                _why(exc))
+    if not isinstance(payload, list):
+        message = (payload or {}).get("message", "unexpected response shape")
+        return [], SourceReport("certspotter-certs", Outcome.FAILED, 0, 0,
+                                str(message)[:80])
+
+    out = []
+    for record in payload:
+        names = [_clean(raw, apex) for raw in record.get("dns_names") or []]
+        names = [n for n in names if n]
+        if not names:
+            continue
+        issuer = record.get("issuer") or {}
+        if isinstance(issuer, dict):
+            issuer_name = str(issuer.get("name") or issuer.get("friendly_name")
+                              or "unknown")
+        else:
+            issuer_name = str(issuer or "unknown")
+        out.append(Certificate(
+            # The first in-apex name is the subject for our purposes. A
+            # certificate covers many names and this is the one we asked about.
+            host=names[0],
+            issuer=issuer_name,
+            not_before=str(record.get("not_before") or "")[:10],
+            not_after=str(record.get("not_after") or "")[:10],
+            observed=Observed.ISSUED,
+            serial=str(record.get("cert_sha256") or "")[:32],
+            # CertSpotter does not publish the signature algorithm on this
+            # endpoint. Left empty rather than guessed — `cert.weak_signature`
+            # simply will not fire from this source, which is honest.
+            signature_algorithm="",
+            organisation="",
+            sans=tuple(names)))
+    return out, SourceReport("certspotter-certs", Outcome.OK, len(out),
+                             len(payload))
+
+
 def from_crtsh(apex: str, permit=None, budget=None, limiter=None):
     """crt.sh. Frequently unavailable — kept because when it answers it is the
     broadest source, and its absence is reported rather than hidden."""
