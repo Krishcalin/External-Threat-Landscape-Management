@@ -175,8 +175,17 @@ export function App() {
     <div className="shell">
       <header className="topbar">
         <div className="wordmark">
-          <span className="grad-text">SKOPOS</span>
-          <small>External Threat Landscape</small>
+          {/* The logo carries the product name and the strapline already, so
+              the text beside it would be a second copy of both. It stays as
+              the accessible name and is hidden visually — a decorative image
+              with no text alternative leaves a screen reader with nothing. */}
+          <img
+            src="/skopos-logo.png"
+            alt="SKOPOS — External Threat Landscape Management"
+            className="brandmark"
+            width={220}
+            height={123}
+          />
         </div>
         <div className="topbar-spacer" />
         {intel && (

@@ -1,10 +1,16 @@
-# SKOPOS
+<p align="center">
+  <img src="docs/skopos-logo.png" alt="SKOPOS — External Threat Landscape Management" width="620">
+</p>
 
-**An open-source External Threat Landscape Management platform.** It continuously
-connects what your organisation exposes to the internet with what adversaries are
-actively exploiting, and drives accountable remediation.
+<p align="center">
+  <strong>An open-source External Threat Landscape Management platform.</strong><br>
+  It continuously connects what your organisation exposes to the internet with
+  what adversaries are actively exploiting, and drives accountable remediation.
+</p>
 
-Python · FastAPI · TypeScript · PostgreSQL · MIT
+<p align="center">
+  Python · FastAPI · TypeScript · PostgreSQL · MIT
+</p>
 
 > A vulnerability scanner produces findings about a system. A threat feed
 > produces statements about the world. Neither is a statement about *you*.

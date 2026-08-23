@@ -253,3 +253,18 @@ tbody tr:hover { background: var(--panel2); }
 .btn-primary:hover { background: var(--accent2); }
 
 .empty { padding: var(--space-6); text-align: center; color: var(--ink3); font-size: 13px; }
+
+/* ── brand ─────────────────────────────────────────────────────────────────
+   The logo is a dark-ground artwork with its own glow, so it sits on either
+   theme without a plate behind it. Height is fixed and width auto so the
+   topbar does not reflow while the image loads. */
+.brandmark {
+  display: block;
+  height: 44px;
+  width: auto;
+  object-fit: contain;
+}
+
+@media (max-width: 640px) {
+  .brandmark { height: 34px; }
+}

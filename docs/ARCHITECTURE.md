@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="skopos-logo.png" alt="SKOPOS" width="420">
+</p>
+
 # SKOPOS — Architecture
 
 How the product is put together, and why each boundary is where it is. Written
