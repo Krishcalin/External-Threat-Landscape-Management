@@ -343,3 +343,48 @@ def test_there_is_no_default_credential(store):
     assert module.bootstrap(store) is None
     for guess in ("admin", "root", "skopos", "administrator"):
         assert store.find_user(guess) is None, guess
+
+
+# ── the sealed pending token ────────────────────────────────────────────────
+def test_a_sealed_pending_token_always_round_trips():
+    """Twenty thousand tokens, because the bug this guards was PROBABILISTIC.
+
+    The first version joined payload and MAC with b"." and split on the last
+    one. The MAC is 16 random bytes and ~6% of them contain 0x2E, so roughly one
+    login in sixteen split in the wrong place and was rejected as expired. It
+    surfaced as a flaky test; in production it would have been intermittent,
+    unreproducible login failures with nothing in the logs.
+
+    A single round-trip assertion would have passed 94% of the time and taught
+    nobody anything.
+    """
+    import time
+
+    from core.auth_store import _open_pending, _seal_pending
+    expiry = int(time.time()) + 180
+    for user_id in range(1, 20001):
+        assert _open_pending(_seal_pending(user_id, expiry)) == user_id
+
+
+def test_a_tampered_pending_token_is_refused():
+    import time
+
+    from core.auth_store import _open_pending, _seal_pending
+    token = _seal_pending(7, int(time.time()) + 180)
+    assert _open_pending(token) == 7
+    flipped = ("A" if token[0] != "A" else "B") + token[1:]
+    assert _open_pending(flipped) is None
+
+
+def test_an_expired_pending_token_is_refused():
+    import time
+
+    from core.auth_store import _open_pending, _seal_pending
+    assert _open_pending(_seal_pending(7, int(time.time()) - 1)) is None
+
+
+@pytest.mark.parametrize("junk", ["", "!!!!", "a", "x" * 200, "....."])
+def test_a_malformed_pending_token_is_a_refusal_not_a_crash(junk):
+    """The login path must not raise on input an attacker controls."""
+    from core.auth_store import _open_pending
+    assert _open_pending(junk) is None

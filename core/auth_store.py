@@ -48,6 +48,10 @@ BOOTSTRAP_PASSWORD_ENV = "SKOPOS_BOOTSTRAP_PASSWORD"
 #: phone, short enough that a stolen one is useless by the time it is noticed.
 PENDING_TTL_SECONDS = 180
 
+#: Truncated HMAC length. Fixed width, so payload and MAC are split by
+#: position rather than by a delimiter that can occur inside the MAC.
+_MAC_BYTES = 16
+
 #: Seals the pending token. Regenerated per process, so a restart invalidates
 #: half-completed logins — which is correct: a login in progress should not
 #: survive the process that started it.
@@ -72,8 +76,14 @@ def _seal_pending(user_id: int, expires_at: int) -> str:
     code is single-use against `totp_last_counter`.
     """
     payload = f"{int(user_id)}.{int(expires_at)}".encode("ascii")
-    mac = hmac.new(_PENDING_SECRET, payload, hashlib.sha256).digest()[:16]
-    return base64.urlsafe_b64encode(payload + b"." + mac).decode("ascii").rstrip("=")
+    mac = hmac.new(_PENDING_SECRET, payload, hashlib.sha256).digest()[:_MAC_BYTES]
+    # NO DELIMITER between payload and MAC. The first version joined them with
+    # b"." and split on the last one — but the MAC is 16 RANDOM bytes and about
+    # 6% of them contain 0x2E, so roughly one login in sixteen split in the
+    # wrong place and was rejected as expired. It presented as a flaky test and
+    # would have presented in production as intermittent, unreproducible login
+    # failures. A fixed-width suffix cannot be ambiguous.
+    return base64.urlsafe_b64encode(payload + mac).decode("ascii").rstrip("=")
 
 
 def _open_pending(token: str) -> Optional[int]:
@@ -82,7 +92,7 @@ def _open_pending(token: str) -> Optional[int]:
         raw = (token or "").encode("ascii")
         raw += b"=" * (-len(raw) % 4)
         decoded = base64.urlsafe_b64decode(raw)
-        payload, _, mac = decoded.rpartition(b".")
+        payload, mac = decoded[:-_MAC_BYTES], decoded[-_MAC_BYTES:]
         user_id_text, _, expiry_text = payload.decode("ascii").partition(".")
         expected = hmac.new(_PENDING_SECRET, payload, hashlib.sha256).digest()[:16]
         if not hmac.compare_digest(mac, expected):
