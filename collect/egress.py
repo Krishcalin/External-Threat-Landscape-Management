@@ -249,11 +249,28 @@ def require(permit, operation: str, *, exposure: "gate.Exposure",
 @contextmanager
 def tcp(permit, operation: str, address: str, port: int,
         budget: Optional[Budget] = None,
-        limiter: Optional[Limiter] = None) -> Iterator[socket.socket]:
-    """A TCP connection to a sealed address. Never re-resolves."""
+        limiter: Optional[Limiter] = None,
+        allowed: Optional[Sequence[str]] = None) -> Iterator[socket.socket]:
+    """A TCP connection to a sealed address. Never re-resolves.
+
+    `allowed` mirrors `udp()`, for the same reason and with the same rule: a
+    PASSIVE permit proved no ownership, so its destination must not be a
+    free-form argument. It exists because RFC 1035 §4.2.2 requires retrying a
+    truncated query over TCP, and that retry goes to the same public resolver
+    the UDP query went to. A caller may subset the allowlist, never extend it.
+    """
     budget = budget or Budget()
     limiter = limiter or Limiter(budget)
     exposure = gate.classify(operation)
+    permitted_addresses = tuple(allowed) if allowed is not None else DEFAULT_RESOLVERS
+
+    if exposure is gate.Exposure.PASSIVE and str(address) not in permitted_addresses:
+        raise PermitMismatch(
+            f"{operation!r} is passive and may only connect to the declared "
+            f"third-party resolvers {list(permitted_addresses)}; {address!r} is "
+            f"not one. Aiming this at customer infrastructure would be active "
+            f"work under a permit that proved nothing.")
+
     require(permit, operation, exposure=exposure, address=address, port=port)
     limiter.acquire(address)
 

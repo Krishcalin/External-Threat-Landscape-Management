@@ -250,3 +250,76 @@ def test_the_headline_names_the_largest_concentration():
     register = suppliers.build(declared, observations, today=TODAY)
     assert "oneprovider.example" in register.headline()
     assert register.refusal is None
+
+
+# ── truncation: our transport limit is not their configuration ──────────────
+def test_a_truncated_response_is_not_conclusive():
+    """Found against a real domain. github.com's apex TXT set does not fit in a
+    datagram; the resolver returns TC with ancount=0, which is byte-identical
+    to NODATA. Before the TC bit was carried, the posture assessment reported
+    that GitHub publishes no SPF record. It does.
+
+    This was never supplier-specific: TXT is in DEFAULT_RRTYPES, so the
+    customer's own sweep recorded large TXT sets as absent and change tracking
+    treated that as an observation.
+    """
+    from collect.dns_wire import Rcode, Response, RRType
+    truncated = Response(name="a.example", rrtype=RRType.TXT, rcode=Rcode.NOERROR,
+                         answers=[], truncated=True)
+    genuine_nodata = Response(name="a.example", rrtype=RRType.TXT,
+                              rcode=Rcode.NOERROR, answers=[])
+    assert truncated.conclusive is False
+    assert genuine_nodata.conclusive is True, "a real NODATA is still a result"
+
+
+def test_the_parser_reads_the_tc_bit():
+    import struct
+
+    from collect.dns_wire import RRType, build_query, parse_response
+    query, txid = build_query("a.example", RRType.TXT)
+    # Header echo with QR + TC set, no answers — what a resolver actually sends.
+    header = struct.pack(">HHHHHH", txid, 0x8380, 1, 0, 0, 0)
+    response = parse_response(header + query[12:], "a.example", RRType.TXT,
+                              txid, "1.1.1.1")
+    assert response.truncated is True
+    assert response.conclusive is False
+
+
+def test_a_failed_tcp_retry_leaves_the_record_unobserved_not_absent():
+    """The retry can fail. What it must never do is report an empty answer."""
+    from collect import dns_records
+    from collect.dns_wire import RRType
+
+    # An unroutable resolver: whatever the failure, the outcome must be the same.
+    response = dns_records.resolve_over_tcp(
+        permit=None, name="a.example", rrtype=RRType.TXT,
+        resolver="203.0.113.1", budget=None, limiter=None)
+    assert response.unreadable is True
+    assert response.conclusive is False
+
+
+def test_passive_tcp_may_only_reach_a_declared_resolver():
+    """The TCP retry gained an allowlist for the same reason udp has one: a
+    passive permit proved no ownership, so its destination must not be a
+    free-form argument."""
+    from collect import egress
+    with pytest.raises(egress.PermitMismatch) as exc:
+        with egress.tcp(permit=None, operation="dns_resolve_recursive",
+                        address="198.51.100.9", port=53):
+            pass
+    assert "may only connect to the declared" in str(exc.value)
+
+
+# ── which signals actually discriminate, measured in the wild ───────────────
+def test_the_module_records_that_presence_signals_are_near_universal():
+    """Measured across 8 real domains: SPF 8/8 and DMARC 8/8, so PRESENCE of
+    either separates nobody. Enforcement 7/8, CAA 3/8, MTA-STS 1/8 do. A screen
+    that leads with an SPF column shows a column of 'yes' and teaches the reader
+    the whole panel is decorative."""
+    assert "8/8" in suppliers.DISCRIMINATION
+    assert "presence of either separates nobody" in suppliers.DISCRIMINATION.lower()
+    for signal in suppliers.DISCRIMINATING:
+        assert signal in Signal
+    assert Signal.SPF not in suppliers.DISCRIMINATING
+    assert Signal.DMARC not in suppliers.DISCRIMINATING
+    assert Signal.DMARC_ENFORCED in suppliers.DISCRIMINATING

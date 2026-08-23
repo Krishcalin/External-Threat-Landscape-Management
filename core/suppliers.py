@@ -139,6 +139,27 @@ class Signal(str, enum.Enum):
         }[self]
 
 
+#: Measured against 8 real domains (github, cloudflare, wikipedia, python.org,
+#: sbi.co.in, irctc.co.in, zomato, hdfcbank) on 2026-08-23, passive lookups
+#: only. The result changed the design: SPF 8/8 and DMARC 8/8, so the PRESENCE
+#: of either separates nobody. What separates them is how far they went —
+#: enforcement 7/8, CAA 3/8, MTA-STS 1/8.
+#:
+#: A posture screen that leads with an SPF column shows a column of "yes" and
+#: teaches its reader that the whole panel is decorative.
+DISCRIMINATION = (
+    "Measured across 8 real domains: SPF 8/8 and DMARC 8/8 — the presence of "
+    "either separates nobody, because publishing them is now universal. What "
+    "distinguishes suppliers is how far they took it: DMARC enforcement 7/8, "
+    "CAA 3/8, MTA-STS 1/8. This register leads with those and reports SPF and "
+    "DMARC presence as context rather than as a score.")
+
+#: The signals worth ranking on. Presence-of-SPF and presence-of-DMARC are
+#: deliberately absent — see DISCRIMINATION.
+DISCRIMINATING = (Signal.DMARC_ENFORCED, Signal.MTA_STS, Signal.CAA,
+                  Signal.CERT_EXPIRING, Signal.REGISTRY_LOCK)
+
+
 class RegisterError(ValueError):
     """A register entry that would misrepresent a commercial relationship."""
 
@@ -450,6 +471,7 @@ def build(suppliers: Sequence[Supplier],
 
 
 __all__ = ["Tier", "Signal", "Supplier", "Posture", "Concentration", "Register",
+           "DISCRIMINATION", "DISCRIMINATING",
            "RegisterError", "assess", "concentrations", "build",
            "CONCENTRATION_MEANING", "TOO_SMALL",
            "MIN_REGISTER_FOR_CONCENTRATION", "MIN_SUPPLIERS_PER_PROVIDER",

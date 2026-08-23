@@ -24,6 +24,7 @@ records DISAPPEARED — "your DNS was deleted" — on a day when nothing changed
 """
 from __future__ import annotations
 
+import struct
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -182,6 +183,54 @@ def resolve_one(permit, name: str, rrtype: RRType, resolver: str,
     return parse_response(data, name, rrtype, txid, resolver)
 
 
+def resolve_over_tcp(permit, name: str, rrtype: RRType, resolver: str,
+                     budget=None, limiter=None) -> Response:
+    """Re-ask a truncated question over TCP. RFC 1035 §4.2.2.
+
+    WHY THIS EXISTS. A resolver that cannot fit the answer in a datagram sets TC
+    and may return ancount=0, which is byte-identical to NODATA. Measured on
+    github.com: a 28-byte response, TC set, no answers — and before the TC bit
+    was carried, the posture assessment reported that GitHub publishes no SPF
+    record.
+
+    Marking TC inconclusive fixes the false claim. Only this makes the record
+    retrievable, and without it every domain with a large TXT set is permanently
+    unobservable, which is honest and useless.
+
+    The message is length-prefixed on TCP (§4.2.2), which is the only wire
+    difference; the same query bytes and the same parser are used either side.
+    """
+    query, txid = build_query(name, rrtype)
+    framed = struct.pack("!H", len(query)) + query
+    try:
+        with egress.tcp(permit, OPERATION, resolver, 53,
+                        budget=budget, limiter=limiter) as sock:
+            sock.sendall(framed)
+            header = _read_exactly(sock, 2)
+            length = struct.unpack("!H", header)[0]
+            data = _read_exactly(sock, length)
+    except egress.BudgetExhausted:
+        raise
+    except Exception as exc:                                   # noqa: BLE001
+        # Reported as unreadable, never as empty. A failed retry leaves the
+        # record UNOBSERVED, which is what it genuinely is.
+        return Response(name=name, rrtype=rrtype, rcode=Rcode.SERVFAIL,
+                        resolver=resolver, unreadable=True,
+                        detail=f"tcp retry: {(str(exc) or type(exc).__name__)[:60]}")
+    return parse_response(data, name, rrtype, txid, resolver)
+
+
+def _read_exactly(sock, count: int) -> bytes:
+    chunks, remaining = [], count
+    while remaining > 0:
+        chunk = sock.recv(remaining)
+        if not chunk:
+            raise OSError("connection closed mid-message")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
 def sweep(names: Sequence[str], actor: str, scope: Scope,
           rrtypes: Sequence[RRType] = DEFAULT_RRTYPES,
           resolvers: Sequence[str] = DEFAULT_RESOLVERS,
@@ -217,9 +266,16 @@ def sweep(names: Sequence[str], actor: str, scope: Scope,
             agreement = Agreement(name=name, rrtype=rrtype)
             for resolver in resolvers:
                 try:
-                    agreement.responses.append(
-                        resolve_one(permit, name, rrtype, resolver,
-                                    budget, limiter))
+                    answer = resolve_one(permit, name, rrtype, resolver,
+                                         budget, limiter)
+                    if answer.truncated:
+                        # The datagram could not hold the record set. Asking
+                        # again over TCP is the protocol's own answer, and the
+                        # alternative is reporting a transport limit as their
+                        # configuration.
+                        answer = resolve_over_tcp(permit, name, rrtype,
+                                                  resolver, budget, limiter)
+                    agreement.responses.append(answer)
                 except egress.BudgetExhausted as exc:
                     result.reports.append(SourceReport(
                         "budget", Outcome.PARTIAL, result.observed,

@@ -93,11 +93,25 @@ class Response:
     #: True when the response could not be read at all — distinct from an empty
     #: answer section, which is a real and meaningful result (NODATA).
     unreadable: bool = False
+    #: RFC 1035 §4.1.1 TC. The record set did not fit in the datagram, so the
+    #: answer section is INCOMPLETE — and a resolver may return TC with
+    #: ancount=0, which is byte-for-byte indistinguishable from NODATA unless
+    #: this flag is carried.
+    #:
+    #: Measured on a real domain: github.com's apex TXT set comes back as a
+    #: 28-byte response, TC set, ancount 0. Without this the parser reported
+    #: "NOERROR, no answers" and the posture assessment said GitHub publishes no
+    #: SPF record. It does. The same false negative applies to the customer's
+    #: own sweep, since TXT is in DEFAULT_RRTYPES.
+    truncated: bool = False
     detail: str = ""
 
     @property
     def conclusive(self) -> bool:
-        return self.rcode.conclusive and not self.unreadable
+        # A truncated answer settles nothing. Treating it as conclusive turns
+        # "the record set did not fit" into "the record set does not exist",
+        # which is our transport limit reported as their configuration.
+        return self.rcode.conclusive and not self.unreadable and not self.truncated
 
     @property
     def values(self) -> List[str]:
@@ -190,6 +204,7 @@ def parse_response(data: bytes, name: str, rrtype: RRType,
         if len(data) < 12:
             raise WireError("response shorter than a DNS header")
         txid, flags, qdcount, ancount, _, _ = struct.unpack(">HHHHHH", data[:12])
+        truncated = bool(flags & 0x0200)          # RFC 1035 §4.1.1, TC
         if expect_txid is not None and txid != expect_txid:
             # A mismatched transaction id is the signature of a spoofed or
             # crossed response. Refusing it is the point of randomising the id.
@@ -225,6 +240,7 @@ def parse_response(data: bytes, name: str, rrtype: RRType,
                 except ValueError:
                     continue     # a record type this parser does not model
         return Response(name=name, rrtype=rrtype, rcode=rcode, answers=answers,
+                        truncated=truncated,
                         resolver=resolver)
     except WireError as exc:
         # UNREADABLE, not empty. An empty answer section is a real result;
