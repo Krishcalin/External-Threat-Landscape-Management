@@ -146,6 +146,10 @@ OPERATIONS: Dict[str, Exposure] = {
     # findings get posted" is exactly the question an audit log should be able
     # to answer.
     "alert_dispatch": Exposure.PASSIVE,
+    # Querying a public vulnerability database. Emits nothing toward the
+    # customer's estate, so PASSIVE — and registered so a lookup appears in the
+    # audit log like every other outbound call.
+    "advisory_lookup": Exposure.PASSIVE,
 
     # FR-GOV-003: reading a public index page is passive collection; presenting
     # credentials to get past a login is participation, and it is not something

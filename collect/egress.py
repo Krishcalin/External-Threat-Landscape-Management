@@ -5,6 +5,7 @@
 # NETWORK-BOUNDARY: web_archive_search
 # NETWORK-BOUNDARY: passive_dns
 # NETWORK-BOUNDARY: rdap_lookup
+# NETWORK-BOUNDARY: advisory_lookup
 # NETWORK-BOUNDARY: dns_resolve_recursive
 # NETWORK-BOUNDARY: dns_resolve_authoritative
 # NETWORK-BOUNDARY: dns_wildcard_probe
@@ -45,6 +46,7 @@ like a scan and adds nothing.
 from __future__ import annotations
 
 import http.client
+import json
 import socket
 import ssl
 import threading
@@ -94,6 +96,7 @@ ALLOWED_HTTP_HOSTS: frozenset = frozenset({
     "web.archive.org",
     "api.mnemonic.no", "otx.alienvault.com",
     "rdap.org", "rdap.verisign.com", "www.rdap.net",
+    "api.osv.dev", "euvdservices.enisa.europa.eu",
 })
 
 #: Third-party recursive resolvers. Not the customer's.
@@ -387,7 +390,63 @@ def http_get(permit, operation: str, url: str, *,
             pass
 
 
+def http_post_json(permit, operation: str, url: str, payload,
+                   *, budget: Optional[Budget] = None,
+                   limiter: Optional[Limiter] = None,
+                   headers: Optional[Dict[str, str]] = None) -> HttpResponse:
+    """A JSON POST, under the same rules as `http_get`.
+
+    OSV's query endpoint takes a POST body, which is the only reason a write
+    verb exists here. It carries no customer data outward — a package name and
+    a version — and is subject to the identical permit, host-allowlist, HTTPS
+    and rate-bucket checks, because an exception carved for one caller is how a
+    choke point stops being one.
+    """
+    budget = budget or Budget()
+    limiter = limiter or Limiter(budget)
+    exposure = gate.classify(operation)
+
+    parts = urlsplit(url)
+    if parts.scheme != "https":
+        raise PermitMismatch(f"{url!r} is not https.")
+    host = parts.hostname or ""
+    if host not in ALLOWED_HTTP_HOSTS:
+        raise PermitMismatch(
+            f"{host!r} is not a registered source host. Passive collection "
+            f"reaches a declared list, not an arbitrary destination.")
+    require(permit, operation, exposure=exposure)
+    limiter.acquire(host)
+
+    body = json.dumps(payload).encode("utf-8")
+    conn = http.client.HTTPSConnection(host, parts.port or 443,
+                                       timeout=budget.connect_timeout,
+                                       context=ssl.create_default_context())
+    try:
+        request_headers = dict(headers or {})
+        request_headers.setdefault("User-Agent",
+                                   "SKOPOS/0.5 (+external-attack-surface)")
+        request_headers["Content-Type"] = "application/json"
+        path = parts.path or "/"
+        if parts.query:
+            path = f"{path}?{parts.query}"
+        conn.request("POST", path, body=body, headers=request_headers)
+        response = conn.getresponse()
+        if response.status in (429, 503):
+            raise RateLimited(f"{host} returned {response.status}")
+        data = response.read(budget.max_body_bytes + 1)
+        truncated = len(data) > budget.max_body_bytes
+        return HttpResponse(status=response.status,
+                            body=data[:budget.max_body_bytes],
+                            headers={k.lower(): v for k, v in response.getheaders()},
+                            truncated=truncated)
+    finally:
+        try:
+            conn.close()
+        except OSError:
+            pass
+
+
 __all__ = ["Budget", "Limiter", "HttpResponse", "PermitMismatch",
            "BudgetExhausted", "RateLimited", "require", "tcp", "udp",
-           "http_get", "PORTS_BY_OPERATION", "ALLOWED_HTTP_HOSTS",
+           "http_get", "http_post_json", "PORTS_BY_OPERATION", "ALLOWED_HTTP_HOSTS",
            "DEFAULT_RESOLVERS", "MAX_RETRY_AFTER", "MAX_CONCURRENCY"]
