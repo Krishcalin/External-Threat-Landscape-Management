@@ -22,6 +22,7 @@ document is the shape.
 6. [Storage](#6-storage)
 7. [The honesty machinery](#7-the-honesty-machinery)
 8. [Module map](#8-module-map)
+8b. [Tenancy](#8b-tenancy)
 9. [Invariants a change must not break](#9-invariants-a-change-must-not-break)
 10. [Adding a collector](#10-adding-a-collector)
 11. [What is deliberately absent](#11-what-is-deliberately-absent)
@@ -334,7 +335,7 @@ the customer's worklist. The writer emits `obs_version`, which normalises to
 
 ## 6. Storage
 
-PostgreSQL 16. Five migrations, applied by `core/migrate.py`.
+PostgreSQL 16. Six migrations, applied by `core/migrate.py`.
 
 | Migration | Tables |
 |---|---|
@@ -343,6 +344,7 @@ PostgreSQL 16. Five migrations, applied by `core/migrate.py`.
 | `003_findings.sql` | `scan_run`, `finding` |
 | `004_forecast.sql` | `forecast` — every finding's full input vector at the moment it was issued |
 | `005_forecast_null_dedupe.sql` | `UNIQUE NULLS NOT DISTINCT` on the forecast key |
+| `006_tenancy.sql` | `org`; `org_id` on every table; per-tenant uniqueness; RLS policies; `skopos_app` gains LOGIN |
 
 `005` exists because of a defect worth recording: the original constraint was
 `UNIQUE (run_id, ...)` with a nullable `run_id`, and in SQL `NULL != NULL`, so
@@ -503,6 +505,8 @@ resource an attacker has *already* claimed.
 | `cert_in.py` | the six-hour clock that will not start itself; the notification draft |
 | `controls.py` | ISO 27001:2022 + NIST CSF 2.0 — contributes / does not / evidence, no percentage |
 | `cii.py` | the CII exposure register; records declarations, designates nothing |
+| `taxii.py` | TAXII 2.1 envelopes, manifests, filtering — `date_added` is the run stamp |
+| `tenancy.py` | the per-request org, applied to every connection; and what RLS is not |
 
 ### Modules that perform I/O
 
@@ -550,6 +554,49 @@ qualified**: `from core import gate` then `gate.Exposure`.
 
 ---
 
+## 8b. Tenancy
+
+Two database identities, and only one of them serves requests.
+
+| Role | Rights | Used by |
+|---|---|---|
+| `skopos` | superuser, owns every table, **bypasses RLS** | migrations only (`SKOPOS_DATABASE_URL`) |
+| `skopos_app` | no superuser, no `BYPASSRLS`, owns nothing | every request (`SKOPOS_APP_DATABASE_URL`) |
+
+**The role split is the feature; the policies are the detail.** Before migration
+006 the application connected as `skopos`. Row-level security does not apply to
+a superuser or a `BYPASSRLS` role — so policies added under that configuration
+would have been inert while the schema reviewed as multi-tenant. That failure
+mode is why `FORCE ROW LEVEL SECURITY` is set on every tenanted table even
+though the app no longer owns them, and why `core/tenancy.py:enforcement()`
+queries `pg_roles` rather than assuming.
+
+**How a row finds its tenant.** `core/tenancy.py` holds the org in a ContextVar;
+every store's `_connect()` calls `tenancy.apply(conn)`, which issues
+`set_config('skopos.org_id', …)`. Binding it to the CONNECTION rather than to
+each query is the point — a new method written by somebody who has never heard
+of tenancy is still filtered. Writes need no changes either: the `org_id` column
+default is `current_setting('skopos.org_id', true)`.
+
+**Unset means nothing, not everything.** `current_setting(…, true)` returns NULL
+when unset, `org_id = NULL` is never true, so a connection that forgot to bind
+sees no rows. An empty result is noticed in minutes; the opposite default is
+noticed by a customer.
+
+**`epss_history` is deliberately global** — no policy, global key. An EPSS score
+is a public fact about a CVE, identical for every tenant, and per-tenant copies
+would leave a tenant whose snapshot job never ran with no velocity data at all.
+
+**What this is worth, precisely.** It prevents cross-tenant leakage *through a
+bug* — a forgotten filter, a new query, a bad join. It is not isolation against
+a compromised application: anything that can execute SQL on that connection can
+also call `set_config` again. Tenants requiring that guarantee need separate
+databases, which this deployment model does not provide. `GET /api/v1/tenancy`
+reports which identity is actually serving, so the two are distinguishable at
+runtime rather than by inspection of a config file.
+
+---
+
 ## 9. Invariants a change must not break
 
 Each of these has a test that fails if it is violated.
@@ -578,6 +625,12 @@ Each of these has a test that fails if it is violated.
     `Declaration` carrying a named person, their own summary, and a tz-aware time.
 19. CII status is never inferred; a gazette claim without its notification
     reference is refused at construction.
+20. Requests are served by a role that cannot bypass row-level security; a
+    connection with no bound organisation sees no rows.
+21. TAXII `date_added` is the scan run's timestamp, never the request's — an
+    `added_after` poll returns a delta, not everything or nothing.
+22. No HTTP route can cause findings to be transmitted outward; delivery is
+    switched on in the environment or not at all.
 
 ---
 

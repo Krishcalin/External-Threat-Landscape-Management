@@ -147,6 +147,20 @@ def live_store():
             admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
 
 
+def bound(dsn, **kw):
+    """A raw connection bound to an organisation, like every store connection.
+
+    After migration 006 a connection that never sets `skopos.org_id` writes NULL
+    into org_id and is refused by NOT NULL. That is the intended failure
+    direction — an unset tenant must not silently land in somebody's data — so
+    tests that reach past the store and execute SQL directly have to declare
+    their tenant too.
+    """
+    import psycopg
+    conn = psycopg.connect(dsn, **kw)
+    conn.execute("SELECT set_config('skopos.org_id', 'default', false)")
+    return conn
+
 @live
 def test_findings_survive_a_new_connection(live_store):
     """The restart case, as close as a test can get: a completely separate
@@ -175,7 +189,7 @@ def test_the_diff_works_across_two_stored_runs(live_store):
 def test_the_database_refuses_an_invented_basis(live_store):
     """PRODUCT_MATCH vs VERSION_RANGE is the product's central claim, so the
     schema refuses a third value rather than accepting one somebody invents."""
-    with psycopg.connect(live_store._dsn, autocommit=True) as conn:
+    with bound(live_store._dsn, autocommit=True) as conn:
         conn.execute("INSERT INTO scan_run (actor, inventory, catalog_version)"
                      " VALUES ('k.de','x','v1')")
         with pytest.raises(psycopg.errors.CheckViolation):

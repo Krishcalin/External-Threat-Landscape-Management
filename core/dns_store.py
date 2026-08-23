@@ -113,11 +113,26 @@ class PostgresDnsStore:
                 raise StoreUnavailable(str(exc)) from exc
 
     def _connect(self):
+        """A connection already bound to this request's organisation.
+
+        Binding here rather than in each query is the point: a new method
+        written by somebody who has never heard of tenancy is still filtered,
+        because the filter lives in the connection.
+        """
         import psycopg
+
+        from core import tenancy
         try:
-            return psycopg.connect(self._dsn)
-        except Exception as exc:                   # pragma: no cover
+            conn = psycopg.connect(tenancy.runtime_dsn(self._dsn) or self._dsn)
+        except Exception as exc:  # pragma: no cover - environment-dependent
             raise StoreUnavailable(f"could not reach the database: {exc}") from exc
+        try:
+            tenancy.apply(conn)
+        except Exception as exc:  # pragma: no cover - environment-dependent
+            conn.close()
+            raise StoreUnavailable(
+                f"could not bind the connection to an organisation: {exc}") from exc
+        return conn
 
     def start_run(self, actor: str, resolvers: Sequence[str]) -> int:
         with self._connect() as conn, conn.cursor() as cur:
@@ -178,7 +193,7 @@ class PostgresDnsStore:
                     " corroboration, target, target_rcode, resolvers_agreeing,"
                     " reasons, evidence, first_seen, last_seen)"
                     " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-                    " ON CONFLICT (name, target, verdict) DO UPDATE"
+                    " ON CONFLICT (org_id, name, target, verdict) DO UPDATE"
                     " SET last_seen = EXCLUDED.last_seen,"
                     "     evidence  = EXCLUDED.evidence",
                     (run_id, row["name"], row["verdict"], row["corroboration"],

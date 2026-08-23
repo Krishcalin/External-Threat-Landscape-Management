@@ -56,6 +56,20 @@ pytestmark = pytest.mark.skipif(
            f"(bring it up with: docker compose up -d db)")
 
 
+def bound(dsn, **kw):
+    """A raw connection bound to an organisation, like every store connection.
+
+    After migration 006 a connection that never sets `skopos.org_id` writes NULL
+    into org_id and is refused by NOT NULL. That is the intended failure
+    direction — an unset tenant must not silently land in somebody's data — so
+    tests that reach past the store and execute SQL directly have to declare
+    their tenant too.
+    """
+    import psycopg
+    conn = psycopg.connect(dsn, **kw)
+    conn.execute("SELECT set_config('skopos.org_id', 'default', false)")
+    return conn
+
 @pytest.fixture(scope="module")
 def store():
     name = f"skopos_test_{uuid.uuid4().hex[:12]}"
@@ -108,7 +122,7 @@ def test_chain_survives_a_round_trip_through_the_database(store):
 # -- constraints that must not depend on the application ---------------------
 def test_manual_attestation_without_an_approver_is_rejected_by_the_database(store):
     """core/ownership.py refuses this too. Both, on purpose — see FR-M0-004."""
-    with psycopg.connect(store._dsn, autocommit=True) as conn:
+    with bound(store._dsn, autocommit=True) as conn:
         with pytest.raises(psycopg.errors.CheckViolation):
             conn.execute(
                 "INSERT INTO ownership_verification "
@@ -118,7 +132,7 @@ def test_manual_attestation_without_an_approver_is_rejected_by_the_database(stor
 
 
 def test_expiry_must_follow_verification(store):
-    with psycopg.connect(store._dsn, autocommit=True) as conn:
+    with bound(store._dsn, autocommit=True) as conn:
         with pytest.raises(psycopg.errors.CheckViolation):
             conn.execute(
                 "INSERT INTO ownership_verification "
@@ -128,7 +142,7 @@ def test_expiry_must_follow_verification(store):
 
 
 def test_an_unknown_scope_kind_is_rejected(store):
-    with psycopg.connect(store._dsn, autocommit=True) as conn:
+    with bound(store._dsn, autocommit=True) as conn:
         with pytest.raises(psycopg.errors.CheckViolation):
             conn.execute(
                 "INSERT INTO scope_rule (kind, value, created_by) "

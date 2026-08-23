@@ -242,7 +242,7 @@ skopos/
 ├── db/                       001 schema · 002 DNS · 003 findings
 ├── data/                     kev.json, epss.json — VERSIONED INPUTS
 ├── docs/P1-BUILD-SPEC.md     the adversarial design pass, and its 86 problems
-└── tests/                    680 tests
+└── tests/                    767 tests
 ```
 
 ---
@@ -271,8 +271,8 @@ skopos/
 
 ## Status
 
-**P0 through P4 complete, and every module now has a surface. 680 tests**
-(650 offline + 30 against a live PostgreSQL).
+**P0 through P5 complete. 767 tests** (704 offline + 63 against a live
+PostgreSQL).
 
 **TEPS golden-tested against SRS §9.1** — the published worked example reproduces
 exactly at 78, every intermediate factor matching (E=0.817, X=1.000, A=0.850,
@@ -301,10 +301,9 @@ number is in the product, not just in this file.
 
 ### Next
 
-- [ ] TAXII server (the STIX bundle now has a route; serving it over TAXII does
-      not)
-- [ ] Alert DELIVERY from a scan run — the decision has a route, dispatch is
-      still configuration-only and unreachable from HTTP by design
+Nothing outstanding on the roadmap. TAXII, alert delivery and tenancy all
+shipped; what remains is operational — running the scheduler continuously so
+forecasts accumulate enough resolved outcomes to publish a skill score.
 - [ ] `Method.PARENT_ZONE`, which would unlock active takeover corroboration —
       specified in `docs/P1-BUILD-SPEC.md` §11, deferred by sponsor decision
 - [ ] Tenancy (FR-M0-001): org_id on every table, RLS, Postgres roles per org
@@ -515,7 +514,87 @@ say what leaving it off costs. It runs immediately on start rather than sleeping
 first, because a scheduler that waits a day before its first run is
 indistinguishable from one that is broken.
 
-**680 tests** (650 offline + 30 live-database).
+**D32 - TAXII's `date_added` is the SCAN RUN's timestamp, never `now()`.** The
+obvious implementation regenerates the bundle per request with a fresh timestamp
+on every object, and then `added_after` either returns everything forever or
+nothing ever — the consumer's incremental poll silently stops working while the
+server keeps answering 200. Object ids were already deterministic (uuid5 over a
+fixed namespace), so stamping every object in run N with run N's `scanned_at`
+gives a consumer exactly the delta it asked for. Verified live: two identical
+requests return identical manifests, `added_after=<that stamp>` returns 0
+objects, `added_after=2020` returns all 136.
+
+The collection is READ-ONLY and that is a refusal, not a gap. Accepting objects
+would mean ingesting third-party claims into a product whose discipline is that
+every statement carries who made it and how it was learned; an inbound STIX
+object arrives with none of that. Registration follows the takeover precedent —
+no `SKOPOS_API_TOKEN`, no routes at all, because a 401 that can be probed is
+still an admission the data exists. `/taxii2/` under the console catch-all also
+had to 404 rather than serve the SPA shell: a TAXII client receiving HTML from a
+discovery endpoint cannot tell "not configured" from "not a TAXII server".
+
+**D33 - a scan does not deliver alerts unless somebody said so, and never via
+the request.** Running a scan describes your estate to yourself; delivering
+alerts describes it to a webhook or a mail server, which is a third party even
+when you own it. `SKOPOS_ALERT_ON_SCAN` gates it, in the ENVIRONMENT rather than
+as a parameter — if the caller could ask for delivery, anyone who can reach the
+endpoint could choose the moment the estate is described to a third party. The
+switch fails closed on any unrecognised value, so a typo cannot send findings
+out.
+
+`deliver_for_run` is the single entry point so the API and any future caller
+cannot drift into different rules, and it always reports which of FOUR states a
+run was in. Three are "nothing was sent", and the third is why the function
+exists: delivery switched on with NO CHANNEL CONFIGURED looks identical to a
+quiet run from the outside, and a silent alerting integration is worse than none
+because it is mistaken for coverage. A delivery failure never fails the scan —
+the findings are persisted and correct; what failed is telling somebody.
+
+**D34 - tenancy is a ROLE change with policies attached, not policies alone.**
+Measured before writing migration 006: the application connected as `skopos`,
+which is `rolsuper`, `rolbypassrls`, and the OWNER of every table. RLS does not
+apply to such a role — not weakly, at all. Policies added under that
+configuration would have produced a schema that reviews as multi-tenant and
+enforces nothing, which is worse than no tenancy because it would be believed.
+
+So `skopos_app` (present since 001, NOLOGIN, never used) became the runtime
+identity: no superuser, no BYPASSRLS, owns nothing. `skopos` remains owner and
+migrator. Proven live on the same data: as the app role, org `default` sees 576
+findings and org `acme` sees 0; with the GUC unset, 0 — the correct failure
+direction, since an empty result is noticed in minutes and the opposite default
+is noticed by a customer. As the superuser, `acme` sees all 576, which is the
+measurement that made the role change necessary.
+
+Three details that carry weight. The column DEFAULT is
+`current_setting('skopos.org_id', true)`, so writes land in the caller's tenant
+without editing a single INSERT — with a literal default every tenant but one
+would fail `WITH CHECK`. Uniqueness became per-tenant: without it, one tenant
+scoping `example.com` silently prevents every other tenant from doing so, and
+the second rule vanishes into `ON CONFLICT DO NOTHING` with no error. And
+`epss_history` deliberately keeps a GLOBAL key and no policy — an EPSS score is
+a public fact about a CVE, and per-tenant copies would leave a tenant whose
+snapshot job never ran with no velocity data while the row it needed was already
+in the table.
+
+Stated limit, everywhere the feature is described: this defends against a BUG —
+a forgotten filter, a new query, a bad join. It is NOT isolation against a
+compromised application, because anything able to run SQL on that connection can
+also change the session variable. "Postgres roles per org", which the SRS asks
+for, was deliberately not done: a role per tenant means DDL at signup and an
+application permanently holding CREATE ROLE, a larger standing privilege than
+the accidental-leak risk it removes.
+
+**Two defects this work surfaced, both found by running it.** Migration 006
+changed four unique constraints, and every `ON CONFLICT` target in the stores
+still named the old columns — the first scan after the migration failed with
+`InvalidColumnReference`. And the tenancy fixture called `ensure_app_role`
+against a throwaway DATABASE, but a PostgreSQL role is CLUSTER-wide: it rewrote
+the real `skopos_app` password for every database on the server, and the running
+application began failing authentication the moment the suite passed. Both are
+in the git history rather than quietly fixed; `ensure_app_role` now takes a role
+name so tests use a throwaway.
+
+**767 tests** (704 offline + 63 live-database).
 
 ---
 

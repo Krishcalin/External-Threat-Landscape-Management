@@ -47,7 +47,7 @@
 
 > **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — the full architecture: the
 > authorisation gate, the egress boundary, the pipeline, the storage model, the
-> module map, and the nineteen invariants a change must not break. Read this
+> module map, and the twenty-two invariants a change must not break. Read this
 > before modifying anything.
 
 ---
@@ -102,6 +102,15 @@ each control it touches is *contributed to*, what it explicitly does **not** do,
 and which evidence it draws on. A percentage would be summed and shown to a
 board, and the board would be receiving a number no external scanner has the
 basis to produce.
+
+**Nothing leaves the building because a scan ran.** A scan describes your
+estate to yourself; delivering alerts describes it to a webhook endpoint or a
+mail server, and consent to the first is not consent to the second. Delivery is
+off unless `SKOPOS_ALERT_ON_SCAN` is set, it is never a request parameter — if
+the caller could ask for it, anyone who could reach the API could choose the
+moment your estate is described to a third party — and a run reports which of
+four states it was in, including "switched on with no channel configured", which
+from the outside looks exactly like a quiet run.
 
 **A thin result is not a clean estate.** Every run reports what it could *not*
 see: sources that failed, sources left out by their terms, names the gate
@@ -331,7 +340,7 @@ zero results.
 
 ## 10. Project status
 
-**P0 through P4 complete.** 680 tests (650 offline, 30 against a live PostgreSQL).
+**P0 through P5 complete.** 767 tests (704 offline, 63 against a live PostgreSQL).
 
 **Shipping:** passive discovery across four data classes, DNS records with
 run-over-run change tracking, dangling-record assessment, gated active
@@ -349,7 +358,29 @@ it also found only **one of four** latency reference classes has enough resolved
 samples to forecast from, so the other three refuse. P4 found that **seven of
 eight** CERT-In reportable categories are not observable from outside an estate.
 
-**Next:** a TAXII server, alert delivery from a scan run, then tenancy.
+**Next:** nothing on the roadmap. The remaining items — a TAXII 2.1 server,
+alert delivery from a scan run, and tenancy — all shipped.
+
+**Tenancy, and what it is honestly worth.** Rows carry an `org_id` and
+PostgreSQL row-level security filters every query against a session variable
+the application sets per connection. The load-bearing part is not the policies:
+the application now connects as an **unprivileged role that owns nothing and
+cannot bypass RLS**. Before that change it connected as a superuser, and RLS
+does not apply to such a role at all — the schema would have reviewed as
+multi-tenant and enforced nothing. This prevents cross-tenant leakage *through a
+bug*: a forgotten filter, a new query, a bad join. It is **not** isolation
+against a compromised application, because anything that can run SQL on that
+connection can also change the session variable. `GET /api/v1/tenancy` reports
+which identity is actually serving, so you can tell the two apart.
+
+**Sharing findings over TAXII 2.1.** Set `SKOPOS_API_TOKEN` and the server
+registers at `/taxii2/` — discovery, collections, objects, and a manifest, with
+`added_after` polling that works because `date_added` is the scan run's
+timestamp rather than the moment of the request. The collection is read-only:
+accepting objects would mean ingesting third-party claims into a product whose
+whole discipline is that every statement carries who made it. Without the token
+the routes are **not registered at all**, because a 401 that can be probed is
+still an admission the data exists.
 
 **Optional, off by default.** A `scheduler` profile runs the two jobs whose
 missed days cannot be refilled — an EPSS snapshot and forecast resolution:
@@ -391,7 +422,7 @@ prediction claim the backtesting harness cannot support.
 ## 12. Contributing
 
 Read [ARCHITECTURE.md §9](docs/ARCHITECTURE.md#9-invariants-a-change-must-not-break)
-first — nineteen invariants, each with a test that fails if it is violated.
+first — twenty-two invariants, each with a test that fails if it is violated.
 
 ```bash
 pip install -r requirements.txt

@@ -180,11 +180,26 @@ class PostgresFindingsStore:
                 raise StoreUnavailable(str(exc)) from exc
 
     def _connect(self):
+        """A connection already bound to this request's organisation.
+
+        Binding here rather than in each query is the point: a new method
+        written by somebody who has never heard of tenancy is still filtered,
+        because the filter lives in the connection.
+        """
         import psycopg
+
+        from core import tenancy
         try:
-            return psycopg.connect(self._dsn)
-        except Exception as exc:                   # pragma: no cover
+            conn = psycopg.connect(tenancy.runtime_dsn(self._dsn) or self._dsn)
+        except Exception as exc:  # pragma: no cover - environment-dependent
             raise StoreUnavailable(f"could not reach the database: {exc}") from exc
+        try:
+            tenancy.apply(conn)
+        except Exception as exc:  # pragma: no cover - environment-dependent
+            conn.close()
+            raise StoreUnavailable(
+                f"could not bind the connection to an organisation: {exc}") from exc
+        return conn
 
     def record_run(self, actor, inventory, catalogue, assets_read,
                    rows_rejected, assets_unmatched, summary, findings) -> int:
@@ -210,7 +225,7 @@ class PostgresFindingsStore:
                     " band, basis, name_confidence, known_ransomware,"
                     " reconciliation, payload)"
                     " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-                    " ON CONFLICT (run_id, asset, cve) DO NOTHING",
+                    " ON CONFLICT (org_id, run_id, asset, cve) DO NOTHING",
                     (run_id, asset, product, cve, teps, band, basis, confidence,
                      ransom, recon, psycopg.types.json.Jsonb(finding)))
         return run_id

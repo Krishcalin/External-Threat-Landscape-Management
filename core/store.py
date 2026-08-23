@@ -131,11 +131,26 @@ class PostgresStore:
                 raise StoreUnavailable(str(exc)) from exc
 
     def _connect(self):
+        """A connection already bound to this request's organisation.
+
+        Binding here rather than in each query is the point: a new method
+        written by somebody who has never heard of tenancy is still filtered,
+        because the filter lives in the connection.
+        """
         import psycopg
+
+        from core import tenancy
         try:
-            return psycopg.connect(self._dsn)
+            conn = psycopg.connect(tenancy.runtime_dsn(self._dsn) or self._dsn)
         except Exception as exc:  # pragma: no cover - environment-dependent
             raise StoreUnavailable(f"could not reach the database: {exc}") from exc
+        try:
+            tenancy.apply(conn)
+        except Exception as exc:  # pragma: no cover - environment-dependent
+            conn.close()
+            raise StoreUnavailable(
+                f"could not bind the connection to an organisation: {exc}") from exc
+        return conn
 
     # -- scope --------------------------------------------------------------
     def load_scope(self) -> Scope:
@@ -152,7 +167,7 @@ class PostgresStore:
             cur.execute(
                 "INSERT INTO scope_rule (kind, value, is_exclude, note, created_by) "
                 "VALUES (%s, %s, %s, %s, %s) "
-                "ON CONFLICT (kind, value, is_exclude) DO NOTHING",
+                "ON CONFLICT (org_id, kind, value, is_exclude) DO NOTHING",
                 (rule.kind.value, rule.canonical, rule.is_exclude,
                  rule.note, actor))
 

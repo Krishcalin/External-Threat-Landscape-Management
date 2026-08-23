@@ -135,7 +135,77 @@ def ensure_current(dsn: Optional[str] = None,
                     f"migration {version} ({path.name}) failed and was rolled "
                     f"back; the schema is unchanged: {exc}") from exc
         newly.append(version)
+
+    # After the schema is current, not before: 006 is what gives the role LOGIN.
+    # Failure here is raised rather than swallowed — a deployment that intended
+    # to run unprivileged and silently stayed on the superuser DSN would have no
+    # tenancy at all and no sign of it.
+    ensure_app_role(target)
     return newly
+
+
+#: The password for the unprivileged runtime role. Never written to a migration
+#: file — a password in db/*.sql is a password in the repository.
+APP_PASSWORD_ENV = "SKOPOS_APP_PASSWORD"
+
+#: The role the application connects as after migration 006. It owns nothing,
+#: is not superuser, and cannot bypass row-level security, which is what makes
+#: the policies in 006 enforcement rather than decoration.
+APP_ROLE = "skopos_app"
+
+
+def ensure_app_role(dsn: Optional[str] = None,
+                    password: Optional[str] = None,
+                    role: Optional[str] = None) -> bool:
+    """Give the runtime role its password. Returns whether one was set.
+
+    Split out of the migration because the migration is a file in the repo and
+    this is a secret. Idempotent: ALTER ROLE ... PASSWORD is safe to repeat, and
+    repeating it is how a rotated password reaches the database.
+
+    Silent no-op when the variable is unset, because a single-tenant deployment
+    that never adopted the app role is a valid configuration — the store says
+    what it connected as, and that is where an operator finds out.
+
+    `role` exists for tests. A PostgreSQL role is CLUSTER-wide, not per-database,
+    so a test that creates a throwaway database and calls this on it still
+    rewrites the REAL role's password for every database in the cluster. That
+    happened: the running application began failing authentication immediately
+    after the suite passed. Tests pass a throwaway role name instead.
+    """
+    import psycopg
+    from psycopg import sql
+
+    secret = password if password is not None else os.environ.get(APP_PASSWORD_ENV, "")
+    if not secret:
+        return False
+    target_role = role or APP_ROLE
+    with psycopg.connect(_dsn(dsn), autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (target_role,))
+        if cur.fetchone() is None:
+            raise MigrationError(
+                f"role {target_role} does not exist; migration 001 creates it "
+                f"and 006 gives it LOGIN. Apply migrations before setting its "
+                f"password")
+        # ALTER ROLE does not accept bound parameters — PostgreSQL parses the
+        # password as part of the statement, so `%s` arrives as a literal `$1`
+        # and is a syntax error. `sql.Literal` does the quoting and escaping
+        # that a bound parameter would have done; hand-building this string
+        # with an f-string is how a password containing a quote becomes a SQL
+        # injection in the one statement that handles a secret.
+        cur.execute(sql.SQL("ALTER ROLE {} WITH LOGIN PASSWORD {}").format(
+            sql.Identifier(target_role), sql.Literal(secret)))
+        # Measured, and the reason this function checks rather than assumes: a
+        # runtime role that could bypass RLS would make every policy in 006
+        # inert while the schema still looked multi-tenant.
+        cur.execute("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = %s",
+                    (target_role,))
+        if cur.fetchone()[0]:
+            raise MigrationError(
+                f"{target_role} is superuser or has BYPASSRLS. Row-level "
+                f"security does not apply to such a role, so tenancy would be "
+                f"enforced by nothing while appearing to be enforced")
+    return True
 
 
 def require_current(dsn: Optional[str] = None,

@@ -350,5 +350,97 @@ def dispatch(alerts: Sequence[Alert],
                      else "delivered")}
 
 
+#: Delivery from a scan run is OFF unless this is set to a true-ish value.
+#:
+#: A scan is already an action somebody took, so it is tempting to treat
+#: delivery as part of it. It is not the same act: running a scan describes
+#: your estate to YOURSELF, and delivering alerts describes it to a webhook
+#: endpoint or a mail server, which is a third party even when you own it.
+#: Consent to the first is not consent to the second.
+ON_SCAN_ENV = "SKOPOS_ALERT_ON_SCAN"
+
+_TRUE = {"1", "true", "yes", "on"}
+
+
+def delivery_enabled(value: Optional[str] = None) -> bool:
+    raw = value if value is not None else os.environ.get(ON_SCAN_ENV, "")
+    return str(raw).strip().lower() in _TRUE
+
+
+def deliver_for_run(diff, takeover_new: Sequence[Dict[str, Any]] = (),
+                    dns_changes: Sequence[Any] = (),
+                    policy: Optional[Policy] = None,
+                    enabled: Optional[bool] = None,
+                    webhook_url: Optional[str] = None,
+                    email_to: Optional[str] = None) -> Dict[str, Any]:
+    """Decide, then deliver only if delivery is switched on. Always report both.
+
+    The single entry point for both the API scan route and the CLI, so the two
+    cannot drift into different rules about when a customer's findings leave the
+    building.
+
+    THE RETURN VALUE ALWAYS SAYS WHICH STATE IT WAS IN. There are four, and
+    three of them are "nothing was sent":
+
+      * nothing met the policy — a quiet run, which is a result
+      * delivery is off — decided and deliberately not sent
+      * delivery is on, no channel configured — a misconfiguration that would
+        otherwise look exactly like a quiet run
+      * delivered, per channel, including partial failure
+
+    The third is the one this exists for. An operator who switched delivery on
+    and set no webhook has a silent integration, and a silent alerting
+    integration is worse than none because it is mistaken for coverage.
+    """
+    decided = build(diff, takeover_new=takeover_new, dns_changes=dns_changes,
+                    policy=policy)
+    alerts: List[Alert] = decided["alerts"]
+    report: Dict[str, Any] = {
+        "decided": len(alerts),
+        "suppressed_below_band": decided["suppressed_below_band"],
+        "suppressed_by_cap": decided["suppressed_by_cap"],
+        "minimum_band": decided["minimum_band"],
+        "note": decided["note"],
+        "delivered": False,
+        "channels": {},
+    }
+
+    if not alerts:
+        report["reason"] = ("nothing met the alert policy, so there was nothing "
+                            "to deliver. A quiet run is a result, not a failure")
+        return report
+
+    if enabled is None:
+        enabled = delivery_enabled()
+    if not enabled:
+        report["reason"] = (
+            f"{len(alerts)} alert(s) were decided and NOT delivered: "
+            f"{ON_SCAN_ENV} is not set. Running a scan describes your estate "
+            f"to yourself; delivering alerts describes it to a third party, "
+            f"and consent to the first is not consent to the second")
+        return report
+
+    sent = dispatch(alerts, webhook_url=webhook_url, email_to=email_to)
+    report["channels"] = sent.get("channels", {})
+    report["delivered"] = bool(sent.get("sent"))
+    if not report["channels"]:
+        report["reason"] = (
+            f"{ON_SCAN_ENV} is on and NO CHANNEL IS CONFIGURED, so nothing was "
+            f"sent. This looks identical to a quiet run from the outside, which "
+            f"is why it is reported here: set SKOPOS_ALERT_WEBHOOK or "
+            f"SKOPOS_ALERT_EMAIL")
+    else:
+        failed = sorted(name for name, c in report["channels"].items()
+                        if not c.get("ok"))
+        report["reason"] = (
+            f"delivered {sent.get('sent', 0)} alert(s)" if not failed
+            else f"channel(s) failed: {', '.join(failed)}. An alert nobody "
+                 f"received and nobody knows was not received is the worst "
+                 f"state available, so the failure is returned rather than "
+                 f"logged and forgotten")
+    return report
+
+
 __all__ = ["Trigger", "DEFAULT_TRIGGERS", "Alert", "Policy", "build",
+           "deliver_for_run", "delivery_enabled", "ON_SCAN_ENV",
            "dispatch", "send_webhook", "send_email", "DeliveryFailed", "BANDS"]

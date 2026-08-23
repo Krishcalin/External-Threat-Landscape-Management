@@ -95,6 +95,8 @@ def health() -> Dict[str, Any]:
         # broken.
         "takeover_route": ("registered" if TAKEOVER_ROUTE_REGISTERED
                            else "not registered — set SKOPOS_API_TOKEN"),
+        "taxii": ("registered at /taxii2/" if TAXII_REGISTERED
+                  else "not registered — set SKOPOS_API_TOKEN"),
     }
 
 
@@ -239,6 +241,23 @@ def run_scan(inventory_path: str = Query(..., description="CSV or JSON asset inv
         _log_forecast_failure = str(exc)
 
     diff = store.diff_against_previous(run_id)
+
+    # ALERT DELIVERY. Gated on SKOPOS_ALERT_ON_SCAN, never on a request
+    # parameter: if the caller could ask for delivery, anyone who can reach
+    # this endpoint could choose the moment the estate is described to a third
+    # party. The switch lives in the environment, where it is set once by
+    # whoever runs the service.
+    #
+    # A delivery failure does not fail the scan. The findings are already
+    # persisted and correct; what failed is telling somebody about them, and
+    # discarding a valid run over that would be the worse trade.
+    from core import alerting as _alerting
+    try:
+        alerting_report = _alerting.deliver_for_run(diff)
+    except Exception as exc:                                   # noqa: BLE001
+        alerting_report = {"decided": None, "delivered": False, "channels": {},
+                           "reason": f"alerting failed: {type(exc).__name__}: {exc}"}
+
     return {
         "run": run_id,
         "scanned_at": date.today().isoformat(),
@@ -254,6 +273,10 @@ def run_scan(inventory_path: str = Query(..., description="CSV or JSON asset inv
         # What is NEW since last time is most of why a monitoring product is
         # worth running continuously rather than once. It was not merely
         # unbuilt before persistence — it was impossible.
+        # Always present, always says which of the four states this run was in
+        # — including "delivery is on and no channel is configured", which from
+        # the outside is indistinguishable from a quiet run.
+        "alerting": alerting_report,
         "since_last_run": {
             "previous_run": diff.previous_run,
             "headline": diff.headline(),
@@ -416,6 +439,193 @@ def _register_takeover(application: FastAPI) -> bool:
 
 
 TAKEOVER_ROUTE_REGISTERED = _register_takeover(app)
+
+# ---------------------------------------------------------------------------
+# TAXII 2.1. Registered only when a token is configured, for the same reason
+# the takeover route is: a feed of somebody's exposed assets joined to exploited
+# vulnerabilities is finished reconnaissance against them, and an unset token
+# must not leave it open.
+
+
+def _taxii_objects(store) -> tuple:
+    """The current bundle, plus the run timestamp every object is stamped with.
+
+    Returns (objects, stamp, counts). The stamp is the SCAN RUN's `scanned_at`,
+    never `now()` — see `core/taxii.py`: a `date_added` that moves per request
+    silently breaks every consumer's incremental poll while the server keeps
+    answering 200.
+    """
+    from core import stix as _stix
+    from core import taxii as _taxii
+
+    runs = store.runs(limit=1)
+    if not runs:
+        return [], "", {}
+    stamp = str(runs[0].get("scanned_at") or "")
+    # STIX timestamps are RFC 3339 with a literal Z. Postgres hands back
+    # "+00:00", which is the same instant and a different string, and TAXII
+    # clients compare `added_after` as text.
+    stamp = stamp.replace(" ", "T").replace("+00:00", "Z")
+    if stamp and not stamp.endswith("Z"):
+        stamp = stamp + "Z"
+
+    rows = store.findings(limit=_taxii.MAX_PAGE)
+    bundle = _stix.bundle(rows, created=stamp)
+    objects = bundle.get("objects", [])
+    determinations = sum(1 for r in rows if str(r.get("basis")) == "version_range")
+    return objects, stamp, {"determinations": determinations,
+                            "worklist": len(rows) - determinations}
+
+
+def _register_taxii(application: FastAPI) -> bool:
+    if not TAKEOVER_TOKEN:
+        return False
+
+    import hmac as _hmac
+
+    from fastapi import Header
+    from fastapi.responses import JSONResponse
+
+    from core import taxii as _taxii
+
+    def _taxii_json(payload: Dict[str, Any], status: int = 200) -> JSONResponse:
+        # The version parameter is part of the media type. A conforming client
+        # content-negotiates on the exact string and treats bare
+        # application/json as a different type.
+        return JSONResponse(content=payload, status_code=status,
+                            media_type=_taxii.MEDIA_TYPE)
+
+    def _authorise(authorization: Optional[str]) -> None:
+        presented = (authorization or "").removeprefix("Bearer ").strip()
+        if not _hmac.compare_digest(presented, TAKEOVER_TOKEN):
+            raise HTTPException(
+                status_code=401,
+                detail=_taxii.TaxiiError(
+                    "Unauthorized",
+                    "a bearer token is required; this collection is finished "
+                    "reconnaissance against the estate it describes",
+                    401).to_dict())
+
+    def _check_root(api_root: str) -> None:
+        if api_root != _taxii.API_ROOT:
+            raise HTTPException(
+                status_code=404,
+                detail=_taxii.TaxiiError(
+                    "Not Found", f"no API root named {api_root!r}", 404).to_dict())
+
+    def _check_collection(collection_id: str) -> None:
+        if collection_id != _taxii.FINDINGS_COLLECTION:
+            raise HTTPException(
+                status_code=404,
+                detail=_taxii.TaxiiError(
+                    "Not Found",
+                    f"no collection {collection_id!r}. This server serves one "
+                    f"collection, {_taxii.FINDINGS_COLLECTION}", 404).to_dict())
+
+    @application.get("/taxii2/", tags=["taxii"])
+    def taxii_discovery(authorization: Optional[str] = Header(None)):
+        """TAXII 2.1 §4.1 discovery."""
+        _authorise(authorization)
+        return _taxii_json(_taxii.discovery())
+
+    @application.get("/taxii2/{api_root}/", tags=["taxii"])
+    def taxii_api_root(api_root: str,
+                       authorization: Optional[str] = Header(None)):
+        _authorise(authorization)
+        _check_root(api_root)
+        return _taxii_json(_taxii.api_root())
+
+    @application.get("/taxii2/{api_root}/collections/", tags=["taxii"])
+    def taxii_collections(api_root: str,
+                          authorization: Optional[str] = Header(None)):
+        _authorise(authorization)
+        _check_root(api_root)
+        _, _, counts = _taxii_objects(_findings_store())
+        return _taxii_json(_taxii.collections(_corpus().catalog_version, counts))
+
+    @application.get("/taxii2/{api_root}/collections/{collection_id}/",
+                     tags=["taxii"])
+    def taxii_collection(api_root: str, collection_id: str,
+                         authorization: Optional[str] = Header(None)):
+        _authorise(authorization)
+        _check_root(api_root)
+        _check_collection(collection_id)
+        _, _, counts = _taxii_objects(_findings_store())
+        return _taxii_json(_taxii.collection(_corpus().catalog_version, counts))
+
+    def _page(collection_id: str, api_root: str, limit: int, next_token: str,
+              match_type: Optional[str], match_id: Optional[str],
+              match_version: Optional[str], match_spec_version: Optional[str],
+              added_after: Optional[str]):
+        _check_root(api_root)
+        _check_collection(collection_id)
+        objects, stamp, _ = _taxii_objects(_findings_store())
+        index = _taxii.date_added_index(objects, stamp)
+        try:
+            selected = _taxii.filter_objects(
+                objects, index, match_type=match_type, match_id=match_id,
+                match_version=match_version,
+                match_spec_version=match_spec_version, added_after=added_after)
+            offset = int(next_token) if next_token else 0
+            page, more, token = _taxii.paginate(selected, limit, offset)
+        except _taxii.TaxiiError as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.to_dict())
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=_taxii.TaxiiError(
+                    "Invalid next",
+                    "next must be the token returned by a previous page",
+                    400).to_dict())
+        return page, more, token, index
+
+    @application.get(
+        "/taxii2/{api_root}/collections/{collection_id}/objects/", tags=["taxii"])
+    def taxii_objects(api_root: str, collection_id: str,
+                      limit: int = Query(_taxii.DEFAULT_PAGE, ge=1,
+                                         le=_taxii.MAX_PAGE),
+                      next: str = Query(""),
+                      added_after: Optional[str] = Query(None),
+                      match_type: Optional[str] = Query(None, alias="match[type]"),
+                      match_id: Optional[str] = Query(None, alias="match[id]"),
+                      match_version: Optional[str] = Query(None,
+                                                           alias="match[version]"),
+                      match_spec_version: Optional[str] = Query(
+                          None, alias="match[spec_version]"),
+                      authorization: Optional[str] = Header(None)):
+        """TAXII 2.1 §5.4. The objects themselves, as a STIX envelope."""
+        _authorise(authorization)
+        page, more, token, _ = _page(collection_id, api_root, limit, next,
+                                     match_type, match_id, match_version,
+                                     match_spec_version, added_after)
+        return _taxii_json(_taxii.envelope(page, more, token))
+
+    @application.get(
+        "/taxii2/{api_root}/collections/{collection_id}/manifest/", tags=["taxii"])
+    def taxii_manifest(api_root: str, collection_id: str,
+                       limit: int = Query(_taxii.DEFAULT_PAGE, ge=1,
+                                          le=_taxii.MAX_PAGE),
+                       next: str = Query(""),
+                       added_after: Optional[str] = Query(None),
+                       match_type: Optional[str] = Query(None, alias="match[type]"),
+                       match_id: Optional[str] = Query(None, alias="match[id]"),
+                       match_version: Optional[str] = Query(None,
+                                                            alias="match[version]"),
+                       match_spec_version: Optional[str] = Query(
+                           None, alias="match[spec_version]"),
+                       authorization: Optional[str] = Header(None)):
+        """TAXII 2.1 §5.3. What is in the collection, without transferring it."""
+        _authorise(authorization)
+        page, more, token, index = _page(collection_id, api_root, limit, next,
+                                         match_type, match_id, match_version,
+                                         match_spec_version, added_after)
+        return _taxii_json(_taxii.manifest(page, index, more, token))
+
+    return True
+
+
+TAXII_REGISTERED = _register_taxii(app)
+
 
 
 @app.get("/api/v1/accuracy", tags=["accuracy"])
@@ -679,6 +889,40 @@ def alerts(run: Optional[int] = None,
     }
 
 
+@app.get("/api/v1/tenancy", tags=["tenancy"])
+def tenancy_status() -> Dict[str, Any]:
+    """Which organisation this instance serves, and whether RLS actually applies.
+
+    The second half is the point. A deployment can have a perfectly correct
+    multi-tenant schema and no tenancy whatsoever — that is exactly the state
+    this codebase was in before migration 006, because the application
+    connected as a superuser and row-level security does not apply to such a
+    role. Nothing in the query results says which one you have, so it is
+    reported here.
+    """
+    from core import tenancy as _tenancy
+
+    payload: Dict[str, Any] = {
+        "org": _tenancy.current_org(),
+        "isolation_meaning": _tenancy.ISOLATION_MEANING,
+    }
+    try:
+        store = _findings_store()
+        connect = getattr(store, "_connect", None)
+        if connect is None:
+            payload["enforcement"] = ("in-memory store: there is no database "
+                                      "and therefore no row-level security")
+            payload["bound_org"] = None
+            return payload
+        with connect() as conn:
+            payload["enforcement"] = _tenancy.enforcement(conn)
+            payload["bound_org"] = _tenancy.bound_org(conn)
+    except StoreUnavailable as exc:
+        payload["enforcement"] = f"unknown: {exc}"
+        payload["bound_org"] = None
+    return payload
+
+
 @app.get("/api/v1/compliance/controls", tags=["compliance"])
 def compliance_controls(framework: Optional[str] = None) -> Dict[str, Any]:
     """Which controls this product helps evidence, and what it does not do.
@@ -856,6 +1100,14 @@ def mount_console(application: FastAPI, directory: Path) -> bool:
         # /api reaching here is a genuine 404 and is reported as one.
         if path.startswith("api/"):
             raise HTTPException(status_code=404, detail=f"no such endpoint: /{path}")
+        if path == "taxii2" or path.startswith("taxii2/"):
+            # Reached only when TAXII is unregistered, i.e. no SKOPOS_API_TOKEN.
+            # Returning the console shell here would hand a TAXII client HTML
+            # from a discovery endpoint, which it cannot distinguish from this
+            # not being a TAXII server at all.
+            raise HTTPException(
+                status_code=404,
+                detail="TAXII is not enabled on this instance; set SKOPOS_API_TOKEN")
         candidate = directory / path
         if candidate.is_file() and directory.resolve() in candidate.resolve().parents:
             return FileResponse(candidate)

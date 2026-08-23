@@ -40,8 +40,40 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
+      # The MIGRATION identity: superuser, owns the tables, bypasses RLS.
       SKOPOS_DATABASE_URL: postgresql://skopos:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/skopos
+      # The RUNTIME identity. Every store prefers this, and it is the whole
+      # reason the row-level security in migration 006 is enforcement rather
+      # than decoration: skopos_app is not superuser, has no BYPASSRLS, and
+      # owns nothing. Unset it and the stores fall back to the superuser above,
+      # where RLS does not apply at all — /api/v1/tenancy reports which one you
+      # are actually running.
+      SKOPOS_APP_DATABASE_URL: ${SKOPOS_APP_DATABASE_URL:-}
+      # Sets skopos_app's password on startup, after migrations apply. Kept out
+      # of db/*.sql because a password in a migration is a password in the repo.
+      SKOPOS_APP_PASSWORD: ${SKOPOS_APP_PASSWORD:-}
+      SKOPOS_ORG_ID: ${SKOPOS_ORG_ID:-default}
       SKOPOS_CONSOLE_DIR: /app/frontend/dist
+      # Unset by default, and that is the safe state: without it the takeover
+      # route and the TAXII server are NOT REGISTERED AT ALL. Both serve
+      # finished reconnaissance against the estate they describe, so an unset
+      # token must not leave them open, and a 401 that can be probed is still
+      # an admission the data exists.
+      SKOPOS_API_TOKEN: ${SKOPOS_API_TOKEN:-}
+      # Alert delivery. Unset means alerts are computed and not delivered,
+      # which the /api/v1/alerts response states rather than leaving to be
+      # discovered.
+      SKOPOS_ALERT_WEBHOOK: ${SKOPOS_ALERT_WEBHOOK:-}
+      SKOPOS_ALERT_EMAIL: ${SKOPOS_ALERT_EMAIL:-}
+      SKOPOS_SMTP_HOST: ${SKOPOS_SMTP_HOST:-}
+      SKOPOS_SMTP_PORT: ${SKOPOS_SMTP_PORT:-587}
+      SKOPOS_SMTP_FROM: ${SKOPOS_SMTP_FROM:-}
+      SKOPOS_SMTP_USER: ${SKOPOS_SMTP_USER:-}
+      SKOPOS_SMTP_PASSWORD: ${SKOPOS_SMTP_PASSWORD:-}
+      # Whether a scan run delivers its alerts. Off by default: a scan is
+      # already an action somebody took, but sending findings to a third party
+      # is a second act and it needs its own consent.
+      SKOPOS_ALERT_ON_SCAN: ${SKOPOS_ALERT_ON_SCAN:-}
     ports:
       - "127.0.0.1:8100:8000"
     depends_on:
@@ -70,10 +102,22 @@ services:
       dockerfile: Dockerfile
     environment:
       SKOPOS_DATABASE_URL: postgresql://skopos:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/skopos
+      # The same unprivileged runtime identity the app uses. Without it these
+      # jobs would connect as the superuser, bypass RLS, and resolve_forecasts
+      # would work across every tenant's forecasts at once — correct-looking on
+      # a single-tenant install and wrong the moment there are two.
+      SKOPOS_APP_DATABASE_URL: ${SKOPOS_APP_DATABASE_URL:-}
+      SKOPOS_ORG_ID: ${SKOPOS_ORG_ID:-default}
       # Override to run more often when verifying the wiring. The default is a
       # day because that is the publication cadence of the data.
       SKOPOS_SCHEDULE_SECONDS: ${SKOPOS_SCHEDULE_SECONDS:-86400}
     entrypoint: ["/bin/sh", "tools/daily.sh"]
+    # The image's healthcheck probes the HTTP API, which this service does not
+    # serve — inherited unchanged it marks the scheduler permanently unhealthy,
+    # which is both untrue and the kind of red status an operator learns to
+    # ignore. Liveness here is the process: if the loop dies, restart handles it.
+    healthcheck:
+      disable: true
     depends_on:
       db:
         condition: service_healthy
