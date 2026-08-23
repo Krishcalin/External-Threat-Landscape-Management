@@ -136,6 +136,17 @@ OPERATIONS: Dict[str, Exposure] = {
     "dns_wildcard_probe": Exposure.ACTIVE,
     "service_banner_read": Exposure.ACTIVE,     # read-only greeting, non-web port
 
+    # --- P2: the one operation that sends data OUT ---
+    # Every other registered operation READS. This one POSTs findings — which
+    # name the customer's unpatched systems — to an endpoint the operator
+    # configured. It is classified PASSIVE because it touches nothing belonging
+    # to the customer's estate or to a third party, which is what the class
+    # means here; it is registered at all because it is network I/O and the
+    # boundary test refuses an undeclared route, and because "where do our
+    # findings get posted" is exactly the question an audit log should be able
+    # to answer.
+    "alert_dispatch": Exposure.PASSIVE,
+
     # FR-GOV-003: reading a public index page is passive collection; presenting
     # credentials to get past a login is participation, and it is not something
     # this product does.
