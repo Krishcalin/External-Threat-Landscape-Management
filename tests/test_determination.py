@@ -176,11 +176,19 @@ def test_the_corpus_flattens_ranges_ready_for_the_evaluator():
 @pytest.mark.skipif(not (ROOT / "data" / "affected.json").is_file(),
                     reason="run tools/refresh_intel.py to vendor affected.json")
 def test_the_vendored_corpus_matches_what_was_measured():
-    """The scope was written on a 40-CVE sample claiming ~67.5% determinable.
-    This asserts the full corpus is in the same territory, so a future refresh
-    that silently collapses the share fails here rather than in a report."""
+    """Catches a COLLAPSE, not a precise value.
+
+    Two samples disagreed badly — a 40-CVE random draw gave 67.5%, an
+    age-stratified draw implied ~41% — so this deliberately does not pin a
+    number it cannot justify. What it does catch is the failure that matters: a
+    refresh whose parser silently stops recognising version data, which would
+    take the share to near zero and quietly turn every determination back into a
+    worklist entry without anything looking broken.
+    """
     corpus = intel.load()
     assert corpus.has_affected
     share = corpus.determinable_share
     assert share is not None
-    assert 0.40 < share < 0.95, f"determinable share {share} is implausible"
+    assert 0.15 < share < 0.98, (
+        f"determinable share {share} is outside any plausible range — either "
+        f"the parser broke or the CVE Program changed its schema")

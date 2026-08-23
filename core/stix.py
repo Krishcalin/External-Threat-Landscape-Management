@@ -4,7 +4,9 @@ THE PROBLEM STIX CREATES FOR THIS PRODUCT
 -----------------------------------------
 STIX has a `vulnerability` object and a `has` relationship, and the obvious
 export writes "this infrastructure has this vulnerability" for every finding.
-That would be a lie for roughly two-thirds of them.
+That is false for every finding that is a worklist entry rather than a
+determination — which is most of them, and the exact share is a property of the
+corpus rather than a constant worth quoting here.
 
 `MatchBasis.PRODUCT_MATCH` means *this asset runs a product with an exploited
 vulnerability* — a worklist entry. `VERSION_RANGE` means the version was
@@ -170,9 +172,11 @@ BUNDLE_CAVEAT = (
     "compared against a published affected range. Relationships of type "
     "`related-to` with confidence 40 are WORKLIST ENTRIES: the asset runs a "
     "product with a known-exploited vulnerability and the version was not "
-    "compared. They are not the same claim, and the exploited-vulnerability "
-    "catalogue carries no version data for roughly a third of its entries, so "
-    "many of these can never become determinations."
+    "compared. They are not the same claim. A substantial part of the "
+    "exploited-vulnerability catalogue carries no comparable version data at "
+    "all — heavily weighted toward older CVEs, whose publishers described "
+    "affected versions in prose — so many of these can never become "
+    "determinations however much data is ingested."
 )
 
 
