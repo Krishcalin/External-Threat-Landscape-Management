@@ -4,9 +4,15 @@ import { AuthError, beginEnrolment, confirmEnrolment, login, verify }
 import type { Enrolment, Session } from '../api/types'
 
 /**
- * The landing page. Three steps, never one form.
+ * The landing page. Form on the left, brand on the right.
  *
- * WHY THE PASSWORD AND THE CODE ARE ON SEPARATE SCREENS. One form taking both
+ * WHY THE BRAND IS ON SCREEN AT ALL, AND WHY IT MOVES FIRST ON A PHONE.
+ * A bare username box with no branding above it is exactly what a phishing page
+ * looks like. On a narrow viewport the two columns collapse to one and the
+ * brand takes `order: -1`, so the product identifies itself BEFORE it asks for
+ * a credential rather than after.
+ *
+ * WHY THE PASSWORD AND THE CODE ARE ON SEPARATE STEPS. One form taking both
  * cannot tell a user whose password is wrong from one whose phone clock has
  * drifted, so it says "login failed" to both and the second user never works
  * out what to fix. It also means the server consults a TOTP secret for callers
@@ -18,11 +24,11 @@ import type { Enrolment, Session } from '../api/types'
  * a form that distinguishes them enumerates usernames for whoever is
  * credential-stuffing.
  *
- * ENROLMENT CANNOT LOCK YOU OUT. The secret is issued but nothing is active
- * until a working code is typed back, so a failed scan or a mistyped key simply
- * does not enrol. The recovery codes are shown once, and the copy says where
- * NOT to keep them — the phone that was just enrolled is the thing they exist
- * to survive.
+ * ENROLMENT OFFERS THREE WAYS IN, NONE REDUNDANT. The QR for a second device
+ * with a camera; the URI as a LINK, so on the phone itself it opens the
+ * authenticator directly with nothing to scan; and the typed key for when the
+ * camera will not focus or the screen is being shared. Nothing is active until
+ * a working code comes back, so a failed scan cannot lock anybody out.
  */
 
 type Step = 'password' | 'code' | 'enrol' | 'recovery'
@@ -78,113 +84,136 @@ export function Login({ onAuthenticated }: { onAuthenticated: (s: Session) => vo
   }
 
   return (
-    <div className="login-shell">
-      <div className="login-card">
-        <img src="/skopos-logo.png" alt="SKOPOS" className="brandmark"
-             style={{ height: 56, marginBottom: 20 }} />
-
-        {error && (
-          <div className="banner banner-crit" role="alert"
-               style={{ marginBottom: 16 }}>
-            {error}
-          </div>
-        )}
-
-        {step === 'password' && (
-          <form onSubmit={submitPassword} className="stack">
-            <h1 className="login-title">Sign in</h1>
-            <label className="field">
-              <span>Username</span>
-              <input value={username} autoFocus autoComplete="username"
-                     onChange={(e) => setUsername(e.target.value)} required />
-            </label>
-            <label className="field">
-              <span>Password</span>
-              <input type="password" value={password}
-                     autoComplete="current-password"
-                     onChange={(e) => setPassword(e.target.value)} required />
-            </label>
-            <button className="btn btn-primary" disabled={busy} type="submit">
-              {busy ? 'Checking…' : 'Continue'}
-            </button>
-            <p className="text-ink3" style={{ fontSize: 12 }}>
-              A password alone will not sign you in. A second factor is required.
-            </p>
-          </form>
-        )}
-
-        {step === 'code' && (
-          <form onSubmit={submitCode} className="stack">
-            <h1 className="login-title">Authentication code</h1>
-            <label className="field">
-              <span>Six digits from your authenticator</span>
-              <input value={code} autoFocus inputMode="numeric"
-                     autoComplete="one-time-code" maxLength={11}
-                     onChange={(e) => setCode(e.target.value)} required />
-            </label>
-            <button className="btn btn-primary" disabled={busy} type="submit">
-              {busy ? 'Verifying…' : 'Sign in'}
-            </button>
-            <p className="text-ink3" style={{ fontSize: 12 }}>
-              A recovery code works here too, if the phone is gone. Codes are
-              single-use even inside the 30 seconds they stay on screen — if you
-              have just used one, wait for the next.
-            </p>
-          </form>
-        )}
-
-        {step === 'enrol' && enrolment && (
-          <form onSubmit={submitEnrolment} className="stack">
-            <h1 className="login-title">Set up your second factor</h1>
-            <p className="text-ink2" style={{ fontSize: 13 }}>
-              Scan this with Microsoft Authenticator, Google Authenticator,
-              Authy or 1Password — or enter the key by hand.
-            </p>
-
-            {/* The URI is a LINK, so on a phone this opens the authenticator
-                directly with nothing to scan. The key below covers the case
-                where the camera is unavailable or the screen is being shared. */}
-            <a className="btn" href={enrolment.uri}>Open in authenticator app</a>
-
-            <div className="secret-box">
-              <span className="text-ink3" style={{ fontSize: 11 }}>SETUP KEY</span>
-              <code className="mono secret-key">{enrolment.formatted}</code>
+    <div className="login-page">
+      <div className="login-form-side">
+        <div className="login-form-wrap">
+          {error && (
+            <div className="banner banner-crit" role="alert"
+                 style={{ marginBottom: 16 }}>
+              {error}
             </div>
+          )}
 
-            <label className="field">
-              <span>Now type back the code it shows</span>
-              <input value={code} autoFocus inputMode="numeric"
-                     autoComplete="one-time-code" maxLength={11}
-                     onChange={(e) => setCode(e.target.value)} required />
-            </label>
-            <button className="btn btn-primary" disabled={busy} type="submit">
-              {busy ? 'Confirming…' : 'Confirm'}
-            </button>
-            <p className="text-ink3" style={{ fontSize: 12 }}>{enrolment.note}</p>
-          </form>
-        )}
+          {step === 'password' && (
+            <>
+              <h1 className="login-title">Sign in</h1>
+              <p className="login-sub">
+                A password alone will not sign you in. A second factor is
+                required.
+              </p>
+              <form onSubmit={submitPassword} className="login-card">
+                <label className="login-label" htmlFor="u">Username</label>
+                <input id="u" className="login-input" value={username} autoFocus
+                       autoComplete="username"
+                       onChange={(e) => setUsername(e.target.value)} required />
+                <label className="login-label" htmlFor="p">Password</label>
+                <input id="p" className="login-input" type="password"
+                       value={password} autoComplete="current-password"
+                       onChange={(e) => setPassword(e.target.value)} required />
+                <button className="btn btn-primary login-btn" disabled={busy}>
+                  {busy ? 'Checking…' : 'Continue'}
+                </button>
+              </form>
+            </>
+          )}
 
-        {step === 'recovery' && (
-          <div className="stack">
-            <h1 className="login-title">Save your recovery codes</h1>
-            <div className="banner banner-warn">
-              <strong>Shown once, and never again.</strong> They are stored only
-              as hashes, so nobody — including whoever runs this instance — can
-              recover them for you.
-            </div>
-            <ul className="recovery-list">
-              {recovery.map((c) => <li key={c} className="mono">{c}</li>)}
-            </ul>
-            <p className="text-ink2" style={{ fontSize: 13 }}>
-              Keep them somewhere that is <strong>not</strong> the phone you just
-              enrolled. That phone being lost is the thing these exist to
-              survive.
-            </p>
-            <button className="btn btn-primary" onClick={() => setStep('code')}>
-              I have saved them — sign in
-            </button>
-          </div>
-        )}
+          {step === 'code' && (
+            <>
+              <h1 className="login-title">Authentication code</h1>
+              <p className="login-sub">
+                Six digits from your authenticator. A recovery code works here
+                too, if the phone is gone.
+              </p>
+              <form onSubmit={submitCode} className="login-card">
+                <label className="login-label" htmlFor="c">Code</label>
+                <input id="c" className="login-input" value={code} autoFocus
+                       inputMode="numeric" autoComplete="one-time-code"
+                       maxLength={11}
+                       onChange={(e) => setCode(e.target.value)} required />
+                <button className="btn btn-primary login-btn" disabled={busy}>
+                  {busy ? 'Verifying…' : 'Sign in'}
+                </button>
+              </form>
+              <p className="login-notice">
+                Codes are single-use even inside the 30 seconds they stay on
+                screen. If you have just used one, wait for the next.
+              </p>
+            </>
+          )}
+
+          {step === 'enrol' && enrolment && (
+            <>
+              <h1 className="login-title">Set up your second factor</h1>
+              <p className="login-sub">
+                Scan with Microsoft Authenticator, Google Authenticator, Authy
+                or 1Password.
+              </p>
+
+              {/* Rendered server-side as SVG by a stdlib encoder verified
+                  against ISO/IEC 18004's worked example — no client library,
+                  and the secret passes through one less piece of code. */}
+              {enrolment.qr_svg && (
+                <div className="qr-frame"
+                     dangerouslySetInnerHTML={{ __html: enrolment.qr_svg }} />
+              )}
+
+              <div className="enrol-alt">
+                {/* A LINK: on the phone itself this opens the authenticator
+                    directly, with nothing to scan. */}
+                <a className="btn" href={enrolment.uri}>
+                  Open in authenticator app
+                </a>
+                <details className="enrol-key">
+                  <summary>Or enter the key by hand</summary>
+                  <code className="mono secret-key">{enrolment.formatted}</code>
+                </details>
+              </div>
+
+              <form onSubmit={submitEnrolment} className="login-card">
+                <label className="login-label" htmlFor="e">
+                  Now type back the code it shows
+                </label>
+                <input id="e" className="login-input" value={code} autoFocus
+                       inputMode="numeric" autoComplete="one-time-code"
+                       maxLength={11}
+                       onChange={(e) => setCode(e.target.value)} required />
+                <button className="btn btn-primary login-btn" disabled={busy}>
+                  {busy ? 'Confirming…' : 'Confirm'}
+                </button>
+              </form>
+              <p className="login-notice">{enrolment.note}</p>
+            </>
+          )}
+
+          {step === 'recovery' && (
+            <>
+              <h1 className="login-title">Save your recovery codes</h1>
+              <div className="banner banner-warn" style={{ marginBottom: 14 }}>
+                <strong>Shown once, and never again.</strong> They are stored
+                only as hashes, so nobody — including whoever runs this
+                instance — can recover them for you.
+              </div>
+              <ul className="recovery-list">
+                {recovery.map((c) => <li key={c} className="mono">{c}</li>)}
+              </ul>
+              <p className="login-sub" style={{ marginTop: 14 }}>
+                Keep them somewhere that is <strong>not</strong> the phone you
+                just enrolled. That phone being lost is the thing these exist to
+                survive.
+              </p>
+              <button className="btn btn-primary login-btn"
+                      onClick={() => setStep('code')}>
+                I have saved them — sign in
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="login-brand-side">
+        <img src="/skopos-logo.png"
+             alt="SKOPOS — External Threat Landscape Management"
+             className="login-logo" />
       </div>
     </div>
   )

@@ -333,32 +333,87 @@ tbody tr:hover { background: var(--panel2); }
 }
 
 /* ── the landing page ──────────────────────────────────────────────────────
-   A centred card on the product's own gradient. Deliberately quiet: a login
-   screen is a thing somebody passes through in four seconds, and drama here
-   costs those four seconds every single day. */
-.login-shell {
-  min-height: 100vh;
+   Two columns: form left, brand right. Deliberately quiet — a login screen is
+   passed through in four seconds, and drama here costs those four seconds every
+   single day. */
+.login-page {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-height: 100vh; background: var(--panel);
+}
+.login-form-side {
   display: flex; align-items: center; justify-content: center;
-  padding: var(--space-5);
+  padding: var(--space-6) var(--space-5);
+}
+.login-form-wrap { width: 100%; max-width: 24rem; }
+
+.login-brand-side {
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--space-6);
+  border-left: 1px solid var(--line);
   background:
-    radial-gradient(circle at 20% 10%,
-      color-mix(in srgb, var(--grad1) 14%, transparent), transparent 45%),
-    radial-gradient(circle at 85% 85%,
-      color-mix(in srgb, var(--grad3) 16%, transparent), transparent 45%),
+    radial-gradient(circle at 30% 20%,
+      color-mix(in srgb, var(--grad1) 16%, transparent), transparent 50%),
+    radial-gradient(circle at 75% 80%,
+      color-mix(in srgb, var(--grad3) 18%, transparent), transparent 50%),
     var(--canvas);
 }
+.login-logo { width: 100%; max-width: 26rem; height: auto; }
 
-.login-card {
-  width: 100%; max-width: 420px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: var(--space-6);
-  box-shadow: var(--shadow);
+/* One column on a narrow viewport, BRAND FIRST — a bare username box with no
+   branding above it is exactly what a phishing page looks like, so the product
+   identifies itself before it asks for a credential. */
+@media (max-width: 860px) {
+  .login-page { grid-template-columns: 1fr; }
+  .login-brand-side {
+    border-left: 0; border-bottom: 1px solid var(--line);
+    padding: var(--space-5); order: -1;
+  }
+  .login-logo { max-width: 15rem; }
 }
 
+.login-shell { min-height: 100vh; background: var(--canvas); }
+
+.login-card {
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+}
+.login-label { font-size: 12px; font-weight: 600; color: var(--ink2); margin-top: 8px; }
+.login-label:first-of-type { margin-top: 0; }
+.login-input {
+  width: 100%; box-sizing: border-box;
+  font: inherit; font-size: 14px; padding: 9px 11px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--panel); color: var(--ink);
+}
+.login-input:focus-visible { border-color: var(--accent); }
+.login-btn { margin-top: var(--space-3); width: 100%; }
+.login-sub { margin: 0 0 var(--space-4); font-size: 13px; line-height: 1.5;
+  color: var(--ink2); }
+.login-notice { margin: var(--space-3) 0 0; font-size: 12px; color: var(--ink3); }
+
+/* The QR. White plate regardless of theme: scanners want maximum contrast and
+   a dark-mode inversion is exactly what makes a symbol fail to read. */
+.qr-frame {
+  display: flex; justify-content: center;
+  background: #ffffff; border: 1px solid var(--line);
+  border-radius: var(--radius); padding: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.qr-frame svg { display: block; width: 100%; max-width: 240px; height: auto; }
+
+.enrol-alt { display: flex; flex-direction: column; gap: var(--space-2);
+  margin-bottom: var(--space-4); }
+.enrol-key summary { font-size: 12px; color: var(--ink2); cursor: pointer;
+  padding: 4px 0; }
+.enrol-key .secret-key { display: block; margin-top: var(--space-2);
+  padding: var(--space-3); background: var(--panel2);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+
 .login-title {
-  font-size: 20px; font-weight: 700; letter-spacing: -.02em;
+  font-size: 22px; font-weight: 700; letter-spacing: -.02em;
   margin: 0 0 var(--space-2);
 }
 

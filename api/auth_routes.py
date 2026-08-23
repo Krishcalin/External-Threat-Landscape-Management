@@ -237,10 +237,33 @@ def register(app: FastAPI) -> bool:
             raise HTTPException(status_code=401,
                                 detail="this login attempt has expired; start again")
         enrolment = store.begin_enrolment(user_id)
+
+        # The QR, rendered server-side as SVG. Three ways in, and none of them
+        # is redundant:
+        #
+        #   the QR   — a second device with a camera, which is the common case
+        #   the URI  — a LINK, so on the phone itself it opens the authenticator
+        #              directly with nothing to scan
+        #   the key  — typed by hand when the camera will not focus or the
+        #              screen is being shared
+        #
+        # Generated here rather than shipped as a JS dependency: the encoder is
+        # stdlib and verified against ISO/IEC 18004's own worked example, and a
+        # client-side library would put the secret through one more piece of
+        # code on its way to being displayed.
+        from core import qr as _qr
+        try:
+            svg = _qr.to_svg(enrolment["uri"], module=5)
+        except Exception:                                       # noqa: BLE001
+            # A QR that failed to render must not block enrolment — the key and
+            # the link both still work.
+            svg = ""
+
         return {
             "secret": enrolment["secret"],
             "formatted": enrolment["formatted"],
             "uri": enrolment["uri"],
+            "qr_svg": svg,
             "note": ("Nothing is enrolled until you type back a working code. "
                      "A failed scan cannot lock you out."),
         }

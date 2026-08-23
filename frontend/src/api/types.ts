@@ -439,6 +439,10 @@ export interface Enrolment {
   secret: string
   formatted: string
   uri: string
+  /** Rendered server-side by a stdlib encoder. Empty if rendering failed — the
+   *  key and the link both still work, so a QR failure must not block
+   *  enrolment. */
+  qr_svg: string
   note: string
 }
 
