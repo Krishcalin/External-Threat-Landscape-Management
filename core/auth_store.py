@@ -128,13 +128,40 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+#: One list, two callers. When `find_user` and `_user_by_id` each carried their
+#: own copy, adding a column meant remembering to add it twice — and the caller
+#: that forgot would silently read `None` for a field the other one populated.
+_USER_KEYS = ("id", "org_id", "username", "password_hash", "display_name",
+              "disabled_at", "totp_secret", "totp_enrolled_at",
+              "totp_last_counter", "is_admin", "must_change_password",
+              "created_at", "created_by", "last_login_at")
+_USER_COLUMNS = ", ".join(_USER_KEYS)
+
+
 class AuthStore(Protocol):
     def create_user(self, username: str, password: str, org_id: str,
-                    created_by: str, display_name: str = "") -> int: ...
+                    created_by: str, display_name: str = "",
+                    is_admin: bool = False,
+                    must_change_password: bool = False) -> int: ...
 
     def user_count(self) -> int: ...
 
     def find_user(self, username: str) -> Optional[Dict[str, Any]]: ...
+
+    def list_users(self, org_id: str) -> List[Dict[str, Any]]: ...
+
+    def admin_count(self, org_id: str) -> int: ...
+
+    def change_password(self, user_id: int, current: str, new: str,
+                        keep_token: str = "") -> int: ...
+
+    def set_disabled(self, user_id: int, disabled: bool) -> bool: ...
+
+    def set_admin(self, user_id: int, is_admin: bool) -> bool: ...
+
+    def reset_password(self, user_id: int, password: str) -> bool: ...
+
+    def reset_second_factor(self, user_id: int) -> bool: ...
 
     def start_login(self, username: str, password: str) -> str: ...
 
@@ -193,7 +220,9 @@ class PostgresAuthStore:
             return int(cur.fetchone()[0])
 
     def create_user(self, username: str, password: str, org_id: str,
-                    created_by: str, display_name: str = "") -> int:
+                    created_by: str, display_name: str = "",
+                    is_admin: bool = False,
+                    must_change_password: bool = False) -> int:
         name = str(username or "").strip().lower()
         if not name:
             raise ValueError("a username is required")
@@ -201,26 +230,160 @@ class PostgresAuthStore:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO app_user (org_id, username, password_hash,"
-                " display_name, created_by) VALUES (%s, %s, %s, %s, %s)"
-                " RETURNING id",
-                (org_id, name, stored, display_name, created_by))
+                " display_name, created_by, is_admin, must_change_password)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (org_id, name, stored, display_name, created_by,
+                 bool(is_admin), bool(must_change_password)))
             return int(cur.fetchone()[0])
 
     def find_user(self, username: str) -> Optional[Dict[str, Any]]:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT id, org_id, username, password_hash, display_name,"
-                "       disabled_at, totp_secret, totp_enrolled_at,"
-                "       totp_last_counter"
-                " FROM app_user WHERE username = %s",
+                f"SELECT {_USER_COLUMNS} FROM app_user WHERE username = %s",
                 (str(username or "").strip().lower(),))
             row = cur.fetchone()
-        if row is None:
-            return None
-        keys = ("id", "org_id", "username", "password_hash", "display_name",
-                "disabled_at", "totp_secret", "totp_enrolled_at",
-                "totp_last_counter")
-        return dict(zip(keys, row))
+        return None if row is None else dict(zip(_USER_KEYS, row))
+
+    def list_users(self, org_id: str) -> List[Dict[str, Any]]:
+        """Every account in ONE organisation.
+
+        The org is a required argument rather than an optional filter. An
+        optional filter defaults to unfiltered, and the day somebody calls this
+        without one, a tenant's administrator receives a list of every account
+        on the instance.
+        """
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_USER_COLUMNS} FROM app_user WHERE org_id = %s"
+                " ORDER BY is_admin DESC, username",
+                (str(org_id),))
+            return [dict(zip(_USER_KEYS, row)) for row in cur.fetchall()]
+
+    def admin_count(self, org_id: str) -> int:
+        """Live administrators. Disabled ones do not count — a disabled
+        administrator cannot create accounts, so treating one as the safety net
+        that permits demoting the last active one would leave nobody."""
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM app_user"
+                " WHERE org_id = %s AND is_admin AND disabled_at IS NULL",
+                (str(org_id),))
+            return int(cur.fetchone()[0])
+
+    # ── changing a password ─────────────────────────────────────────────────
+    def change_password(self, user_id: int, current: str, new: str,
+                        keep_token: str = "") -> int:
+        """Verify the current password, set the new one, and revoke the rest.
+
+        Returns the number of OTHER sessions revoked, which the console reports
+        back: 'signed out of 3 other sessions' is how somebody discovers a
+        session they did not open.
+
+        The whole thing is one transaction. Split across two, a crash between
+        them leaves the password changed and every stolen session still live —
+        which is the precise failure the revocation exists to prevent.
+        """
+        authn.check_password_policy(new)                # raises WeakPassword
+        user = self._user_by_id(user_id)
+        if user is None:
+            raise LoginFailed("no such user")
+        if not authn.verify_password(current, user["password_hash"]):
+            # Same exception as a failed login: this is a password check, and it
+            # fails for the same reason and reveals no more.
+            raise LoginFailed("that password is not correct")
+
+        stored = authn.hash_password(new)
+        keep = authn.token_fingerprint(keep_token) if keep_token else ""
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE app_user SET password_hash = %s,"
+                " password_changed_at = now(), must_change_password = FALSE"
+                " WHERE id = %s",
+                (stored, user_id))
+            cur.execute(
+                "UPDATE app_session SET revoked_at = now()"
+                " WHERE user_id = %s AND revoked_at IS NULL"
+                "   AND fingerprint <> %s",
+                (user_id, keep))
+            return int(cur.rowcount)
+
+    # ── administration ──────────────────────────────────────────────────────
+    def set_disabled(self, user_id: int, disabled: bool) -> bool:
+        """Disable or restore an account, and cut its sessions immediately.
+
+        Without the second statement, disabling would take effect at the next
+        login — so the account being disabled *because* it is compromised keeps
+        working for whoever holds the cookie, for hours.
+        """
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE app_user SET disabled_at = %s WHERE id = %s",
+                (None if not disabled else _now(), user_id))
+            changed = cur.rowcount > 0
+            if disabled:
+                cur.execute(
+                    "UPDATE app_session SET revoked_at = now()"
+                    " WHERE user_id = %s AND revoked_at IS NULL", (user_id,))
+            return changed
+
+    def set_admin(self, user_id: int, is_admin: bool) -> bool:
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute("UPDATE app_user SET is_admin = %s WHERE id = %s",
+                        (bool(is_admin), user_id))
+            return cur.rowcount > 0
+
+    def reset_password(self, user_id: int, password: str) -> bool:
+        """Replace a forgotten password with an issued one-time credential.
+
+        Takes the password rather than generating it, so the only generator in
+        the codebase stays `accounts.issue_initial_password` — two of them drift,
+        and the weaker one is the one nobody re-reads.
+
+        `must_change_password` goes back on, so the account is once again locked
+        to the change form until its owner picks something the administrator has
+        not seen. Sessions are revoked because the reason for a reset is usually
+        that the credential is in doubt.
+        """
+        stored = authn.hash_password(password)           # raises WeakPassword
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE app_user SET password_hash = %s,"
+                " must_change_password = TRUE, password_changed_at = now()"
+                " WHERE id = %s", (stored, user_id))
+            changed = cur.rowcount > 0
+            cur.execute(
+                "UPDATE app_session SET revoked_at = now()"
+                " WHERE user_id = %s AND revoked_at IS NULL", (user_id,))
+            return changed
+
+    def reset_second_factor(self, user_id: int) -> bool:
+        """Clear an enrolment so the user can enrol a new authenticator.
+
+        Clears the secret as well as the timestamp. Leaving the old secret in
+        place would mean a lost phone that is later recovered — or a phone in
+        somebody else's hands — still produces accepted codes after the reset
+        that was performed because of it.
+
+        Sessions go too: the point of a reset is usually that the user's second
+        factor is in doubt, and a live session was admitted by the factor now
+        being replaced.
+        """
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                # -1, not NULL: the column is NOT NULL and -1 is its sentinel
+                # for 'no code has ever been accepted'. NULL would be a crash,
+                # and 0 would be a counter — one that a replayed code from the
+                # epoch could in principle beat.
+                "UPDATE app_user SET totp_secret = NULL,"
+                " totp_enrolled_at = NULL, totp_last_counter = -1"
+                " WHERE id = %s", (user_id,))
+            changed = cur.rowcount > 0
+            cur.execute("DELETE FROM app_recovery_code WHERE user_id = %s",
+                        (user_id,))
+            cur.execute(
+                "UPDATE app_session SET revoked_at = now()"
+                " WHERE user_id = %s AND revoked_at IS NULL", (user_id,))
+            return changed
 
     # ── login, in two steps ─────────────────────────────────────────────────
     def start_login(self, username: str, password: str) -> str:
@@ -317,7 +480,8 @@ class PostgresAuthStore:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT s.id, u.id, u.username, u.org_id, u.display_name,"
-                "       s.expires_at, s.absolute_expiry"
+                "       s.expires_at, s.absolute_expiry, u.is_admin,"
+                "       u.must_change_password"
                 " FROM app_session s JOIN app_user u ON u.id = s.user_id"
                 " WHERE s.fingerprint = %s AND s.revoked_at IS NULL"
                 "   AND u.disabled_at IS NULL",
@@ -325,7 +489,8 @@ class PostgresAuthStore:
             row = cur.fetchone()
             if row is None:
                 return None
-            session_id, user_id, username, org_id, display, expires, absolute = row
+            (session_id, user_id, username, org_id, display, expires, absolute,
+             is_admin, must_change) = row
             now = _now()
             if expires < now or absolute < now:
                 return None
@@ -335,7 +500,13 @@ class PostgresAuthStore:
             cur.execute("UPDATE app_session SET expires_at = %s WHERE id = %s",
                         (extended, session_id))
         return {"user_id": user_id, "username": username, "org_id": org_id,
-                "display_name": display, "expires_at": extended.isoformat()}
+                "display_name": display, "expires_at": extended.isoformat(),
+                "is_admin": bool(is_admin),
+                # Read on EVERY request rather than stamped into the session at
+                # login: an administrator resetting somebody's password takes
+                # effect on that user's next request, not whenever their session
+                # happens to expire.
+                "must_change_password": bool(must_change)}
 
     def revoke_session(self, token: str) -> bool:
         with self._connect() as conn, conn.cursor() as cur:
@@ -404,17 +575,10 @@ class PostgresAuthStore:
     def _user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT id, org_id, username, password_hash, display_name,"
-                "       disabled_at, totp_secret, totp_enrolled_at,"
-                "       totp_last_counter FROM app_user WHERE id = %s",
+                f"SELECT {_USER_COLUMNS} FROM app_user WHERE id = %s",
                 (user_id,))
             row = cur.fetchone()
-        if row is None:
-            return None
-        keys = ("id", "org_id", "username", "password_hash", "display_name",
-                "disabled_at", "totp_secret", "totp_enrolled_at",
-                "totp_last_counter")
-        return dict(zip(keys, row))
+        return None if row is None else dict(zip(_USER_KEYS, row))
 
 
 def bootstrap(store: AuthStore, org_id: str = "default") -> Optional[str]:
@@ -431,8 +595,17 @@ def bootstrap(store: AuthStore, org_id: str = "default") -> Optional[str]:
         return None
     if store.user_count() > 0:
         return None
+    # An administrator, explicitly. Nothing else can grant the flag — every
+    # other route requires an existing administrator to call it — so a first
+    # user created without it would be an instance where no account can ever be
+    # created again.
+    #
+    # `must_change_password` stays FALSE: the operator chose this secret from
+    # the environment and nobody else has seen it, unlike the credential an
+    # administrator issues to somebody else.
     store.create_user(username=username, password=password, org_id=org_id,
-                      created_by="bootstrap", display_name=username)
+                      created_by="bootstrap", display_name=username,
+                      is_admin=True)
     return username
 
 

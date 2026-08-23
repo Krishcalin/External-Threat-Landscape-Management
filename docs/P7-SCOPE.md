@@ -118,6 +118,88 @@ ignored thereafter.
 codes exist because a wiped phone otherwise means an administrator can never log
 in again, and for the first administrator there is no administrator to ask.
 
+### W1a — the accounts the login implied (added after P7 closed)
+
+W1 shipped a login and no way to use it: no second account could be created, no
+password could be changed, and nothing in the console called the logout endpoint
+that existed. The gap was reported from a screenshot of the running instance,
+which is the correct way to find it and a late one.
+
+**A role column was the first thing needed, not the last.** Migration 008 made
+every user equal, which is fine while the only user is the bootstrap
+administrator and stops being fine the moment a second exists — without a role,
+any authenticated user could create another, so one compromised low-privilege
+session escalates to permanent access by making itself a friend. `is_admin` is
+one boolean rather than a permissions matrix, because a product with two verbs
+that invents a matrix has built machinery nobody can audit.
+
+**Three things an administrator deliberately cannot do**, each because the
+alternative is worse than the missing feature:
+
+| Refused | Why |
+|---|---|
+| Disable themselves, or the last administrator | There is no recovery path from an instance with none — the state `008` already records as unrecoverable, reachable by one misclick |
+| Create an account in another organisation | The org is read from the session and cannot be passed. As a parameter it would defeat migration 006's boundary through the front door |
+| Anything at all to an estate | `is_admin` appears nowhere in the authorisation path; a test asserts `gate.py` never mentions it |
+
+**And one thing this got wrong first.** The original design had no password reset
+at all, reasoning that an administrator who cannot set a password cannot sign in
+as you. That was true, and it cost more than it bought: a forgotten password
+meant a permanently dead account, and because `008` makes usernames globally
+unique, a permanently burned username with it. A product whose answer to "I
+forgot my password" is "your account is gone" gets worked around by people
+sharing credentials, which is a worse security outcome than a bounded
+administrator power.
+
+So the reset exists, and the claim was corrected everywhere it appeared rather
+than left standing. **An administrator who resets both a password and a second
+factor can sign in as that user.** That is true of every system where one person
+can do both. What is bounded is the rest: the password is generated rather than
+chosen, the account is locked to the change form until its owner replaces it,
+and **both halves are written to the hash-chained audit log** — the takeover is
+reconstructable even though it is not preventable.
+
+**Auditing account actions surfaced a real privilege bug in `core/store.py`.**
+`append_audit` took `LOCK TABLE audit_log IN EXCLUSIVE MODE`, which was fine
+while the only caller was the CLI connecting as the table owner. The API
+connects as `skopos_app`, which holds INSERT and SELECT on that table and
+deliberately nothing else — an application able to UPDATE or DELETE its own
+tamper-evident log is not one. PostgreSQL requires UPDATE, DELETE, TRUNCATE or
+MAINTAIN for every lock mode above ROW EXCLUSIVE, so the first audited route
+failed with `InsufficientPrivilege`. Granting those privileges would have fixed
+the symptom by deleting the property; a transaction-scoped advisory lock needs no
+table privilege, serialises identically, and both callers take the same key.
+
+**A password change requires the current password**, even though the session
+already passed both factors at login. Those prove who signed in; they do not
+prove who is holding the cookie now. Without the rule a stolen session becomes a
+permanent takeover — the thief sets a new password, the owner is locked out, and
+the second factor never comes up again. It also revokes every *other* session
+and reports how many, because somebody who sees "3 other sessions" when they
+expected none has just learned something.
+
+**An account an administrator created is not yet that person's account.** It
+starts on a credential the administrator chose and has seen, so
+`must_change_password` gates it: the session can reach the change form, logout
+and nothing else. Enforced in the middleware rather than a dependency, for the
+same reason the org binding is — a dependency binds only for routes that declare
+it, and the next route added by somebody who has not heard of this would serve a
+locked session.
+
+**One bug the tests caught before a user did.** `reset_second_factor` set
+`totp_last_counter` to NULL against a `NOT NULL DEFAULT -1` column, so clearing
+an enrolment would have raised `NotNullViolation` — the recovery path for a lost
+authenticator, failing exactly when somebody needed it. -1 is the column's
+sentinel for "nothing accepted yet"; 0 would be a counter.
+
+Verified end-to-end against the running container rather than in unit tests
+alone: **48 checks** driving the real HTTP API with real cookies, including that
+a disabled account's live session dies on the next request rather than at
+expiry, that a locked account really can reach nothing but its own password
+form, and that no issued password appears anywhere in the audit log. The
+privilege bug above was invisible to every unit test and failed on the first
+live call — which is the argument for the probe existing at all.
+
 ---
 
 ## W2 — ask anything (passive lookup)

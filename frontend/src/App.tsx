@@ -11,8 +11,10 @@ import { accuracy as fetchAccuracy, alerts as fetchAlerts,
 import type { Accuracy, AlertsView, CertInStatus, CiiRegister, ControlMapping,
               CrosshairView, DnsRun, Finding, IntelStatus, LatencyReport,
               ReconciliationOutcome,
-              ChangesView, RunRow, SupplierRegister,
+              ChangesView, RunRow, Session, SupplierRegister,
               Summary, Tenancy } from './api/types'
+import { logout } from './api/auth'
+import { AccountPanel } from './components/AccountPanel'
 import { AccuracyPanel } from './components/AccuracyPanel'
 import { BrandPanel } from './components/BrandPanel'
 import { ExecutivePanel } from './components/ExecutivePanel'
@@ -51,7 +53,7 @@ import { TepsBar } from './components/TepsBar'
 
 type Section = 'worklist' | 'operations' | 'executive' | 'crosshair'
   | 'graph' | 'lookup' | 'brand' | 'suppliers' | 'compliance'
-  | 'accuracy' | 'alerts' | 'system'
+  | 'accuracy' | 'alerts' | 'system' | 'account'
 
 /** Worklist first because it is what somebody opens the console to do; System
  *  last because it answers a question asked once per deployment. */
@@ -72,6 +74,10 @@ const SECTIONS: { id: Section; label: string }[] = [
   { id: 'compliance', label: 'Compliance' },
   { id: 'accuracy', label: 'Accuracy' },
   { id: 'system', label: 'This instance' },
+  // Beside "This instance" because both answer questions about the deployment
+  // rather than about the estate, and last because neither is why anybody
+  // opened the console.
+  { id: 'account', label: 'Account' },
 ]
 
 const RECON_TONE: Record<ReconciliationOutcome, string> = {
@@ -191,7 +197,7 @@ function FindingRow({ finding, open, onToggle }: {
   )
 }
 
-export function App() {
+export function App({ session = null }: { session?: Session | null }) {
   const [intel, setIntel] = useState<IntelStatus | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
   const [rows, setRows] = useState<Finding[]>([])
@@ -212,7 +218,6 @@ export function App() {
   const [supplierRegister, setSupplierRegister] = useState<SupplierRegister | null>(null)
   const [runs, setRuns] = useState<RunRow[]>([])
   const [changes, setChanges] = useState<ChangesView | null>(null)
-  const [session, setSession] = useState<{ username: string } | null>(null)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -254,11 +259,11 @@ export function App() {
     fetchSuppliers().then(setSupplierRegister).catch(() => setSupplierRegister(null))
     fetchRuns().then((page) => setRuns(page.runs)).catch(() => setRuns([]))
     fetchChanges().then(setChanges).catch(() => setChanges(null))
-    // The actor on a lookup permit. Falls back to 'console' on an
-    // unauthenticated instance, which the audit record then shows.
-    fetch('/api/v1/auth/session', { credentials: 'include' })
-      .then((r) => (r.ok ? r.json() : null)).then(setSession)
-      .catch(() => setSession(null))
+    // The session used to be fetched here too, with a raw `fetch` that returned
+    // only a username. It now arrives as a prop from AuthGate, which had
+    // already resolved it one round trip earlier — two components asking
+    // separately can disagree about who is signed in, and the one drawing the
+    // sign-out control must not be the one that is wrong.
   }, [])
 
   const unexplained = summary?.reconciliation?.unexplained_exposure ?? 0
@@ -292,13 +297,39 @@ export function App() {
             </div>
           </div>
         )}
+        {session && (
+          <div className="whoami">
+            <button
+              className="btn"
+              onClick={() => setSection('account')}
+              title="Your account"
+            >
+              {session.display_name || session.username}
+            </button>
+            {/* A server call, not a cleared cookie. Revoking the session is
+                what makes the token useless; clearing it locally only makes it
+                invisible, and a token that still works somewhere else is not a
+                signed-out session. The reload is what discards every panel's
+                loaded state, so the next person at this machine starts at the
+                login screen with nothing rendered behind it. */}
+            <button
+              className="btn"
+              onClick={() => { void logout().finally(() => location.reload()) }}
+            >
+              Sign out
+            </button>
+          </div>
+        )}
         <button className="btn" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
           {theme === 'light' ? 'Dark' : 'Light'}
         </button>
       </header>
 
       <nav className="tabs" role="tablist" aria-label="Console sections">
-        {SECTIONS.map(({ id, label }) => (
+        {/* Account needs somebody to be signed in. On an open instance — no
+            users configured — there is no account to administer, and the tab
+            would lead to a panel that can only report 401. */}
+        {SECTIONS.filter(({ id }) => id !== 'account' || session).map(({ id, label }) => (
           <button
             key={id}
             role="tab"
@@ -355,6 +386,8 @@ export function App() {
         )}
 
         {section === 'accuracy' && <AccuracyPanel accuracy={accuracy} />}
+
+        {section === 'account' && session && <AccountPanel session={session} />}
 
         {section === 'alerts' && <AlertsPanel view={alerts} />}
 

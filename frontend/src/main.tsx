@@ -9,8 +9,10 @@ import { AuthGate } from './components/AuthGate'
 // been decided.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <AuthGate>
-      <App />
-    </AuthGate>
+    {/* The gate hands the session down rather than the console fetching it
+        again: two components asking `/auth/session` separately can disagree
+        about who is signed in, and the one drawing the sign-out control must
+        not be the one that is wrong. */}
+    <AuthGate>{(session) => <App session={session} />}</AuthGate>
   </StrictMode>,
 )

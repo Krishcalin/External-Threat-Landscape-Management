@@ -237,13 +237,30 @@ skopos/
 │   ├── takeover_scan.py      dangling assessment + RDAP
 │   ├── http_probe.py         HTTP/TLS identity signals (active)
 │   └── fingerprint.py        the run, under permits, writing what joins
-├── api/app.py                FastAPI; serves the console same-origin
+├── core/  (authentication and accounts — separate from the gate on purpose)
+│   ├── authn.py              password hashing, session tokens, cookie parsing
+│   ├── totp.py               RFC 6238; qr.py renders the enrolment code
+│   ├── auth_store.py         users, sessions, enrolment  (storage only)
+│   └── accounts.py           WHO MAY EXIST. Every rule and every refusal:
+│                             the last admin, the org, the current password
+├── api/
+│   ├── app.py                FastAPI; serves the console same-origin
+│   ├── auth_routes.py        login, second factor, logout, AND the middleware
+│   │                         that binds the org and locks an unchanged password
+│   └── account_routes.py     account administration; status codes, no rules
 ├── frontend/                 React + TypeScript console
-├── db/                       001 schema · 002 DNS · 003 findings
+├── db/                       001 schema · 002 DNS · 003 findings · 004-005 ·
+│                             006 tenancy · 007 suppliers · 008 auth ·
+│                             009 accounts (is_admin, must_change_password)
 ├── data/                     kev.json, epss.json — VERSIONED INPUTS
 ├── docs/P1-BUILD-SPEC.md     the adversarial design pass, and its 86 problems
-└── tests/                    1,081 tests
+└── tests/                    1,139 tests
 ```
+
+**`accounts.py` is not `gate.py`, and must never become it.** The gate decides
+what may be done to an *asset*; accounts decides who may *exist*. An
+administrator gains no authority over any estate, `is_admin` appears nowhere in
+the authorisation path, and a test asserts that `gate.py` never mentions it.
 
 ---
 

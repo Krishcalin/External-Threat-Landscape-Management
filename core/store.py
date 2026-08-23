@@ -32,6 +32,14 @@ from core.ownership import Method, Verification
 from core.scope import Scope, ScopeKind, ScopeRule
 
 
+#: The advisory-lock key that serialises audit appends. An arbitrary constant —
+#: what matters is only that every caller uses the SAME one, so the CLI (which
+#: connects as the owner) and the API (which connects as `skopos_app`) still
+#: serialise against each other. See `PostgresStore.append_audit` for why this
+#: is not `LOCK TABLE`.
+AUDIT_APPEND_LOCK = 0x5B0705_AD17
+
+
 class StoreUnavailable(RuntimeError):
     """The datastore could not be reached or is not initialised."""
 
@@ -234,12 +242,27 @@ class PostgresStore:
         head, both compute seq N+1, and one loses on the primary key — or worse,
         with a different key, both land and the chain forks. A forked audit log
         is not an audit log.
+
+        WHY AN ADVISORY LOCK AND NOT `LOCK TABLE`. It was `LOCK TABLE audit_log
+        IN EXCLUSIVE MODE` while the only caller was the CLI, which connects as
+        the owner. The API connects as `skopos_app`, which holds INSERT and
+        SELECT on this table and deliberately nothing else — an application that
+        can UPDATE or DELETE its own tamper-evident log is not one. PostgreSQL
+        requires UPDATE, DELETE, TRUNCATE or MAINTAIN for every lock mode above
+        ROW EXCLUSIVE, so the append simply failed with `InsufficientPrivilege`
+        the first time a route tried it.
+
+        Granting those privileges would have fixed the symptom by removing the
+        property. A transaction-scoped advisory lock needs no table privilege at
+        all, serialises exactly as well, and both callers take the same key, so
+        the CLI and the API still serialise against each other.
         """
         import psycopg
         chain = AuditChain()
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("LOCK TABLE audit_log IN EXCLUSIVE MODE")
+                cur.execute("SELECT pg_advisory_xact_lock(%s)",
+                            (AUDIT_APPEND_LOCK,))
                 cur.execute("SELECT seq, at, actor, action, payload, prev_hash, "
                             "record_hash FROM audit_log "
                             "ORDER BY seq DESC LIMIT 1")
@@ -283,4 +306,4 @@ def open_store(dsn: Optional[str] = None) -> Store:
 
 
 __all__ = ["Store", "MemoryStore", "PostgresStore", "StoreUnavailable",
-           "open_store", "GENESIS"]
+           "open_store", "GENESIS", "AUDIT_APPEND_LOCK"]

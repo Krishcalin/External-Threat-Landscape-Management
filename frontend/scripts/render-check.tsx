@@ -19,6 +19,9 @@ import { CompliancePanel } from '../src/components/CompliancePanel'
 import { CoveragePanel } from '../src/components/CoveragePanel'
 import { CrosshairPanel } from '../src/components/CrosshairPanel'
 import { SystemPanel } from '../src/components/SystemPanel'
+import { AccountPanel } from '../src/components/AccountPanel'
+import { FirstPasswordChange } from '../src/components/FirstPasswordChange'
+import type { Session } from '../src/api/types'
 
 const BASE = 'http://127.0.0.1:8100/api/v1'
 // A failed fetch must NOT become `null` here. `null` is a legitimate state
@@ -44,6 +47,15 @@ const get = async (p: string) => {
     return null
   }
   return await r.json()
+}
+
+/** A session shape, not a real one. The account panel fetches its own user list
+ *  on mount, which does not run under `renderToString` — so this checks the
+ *  first paint, which is exactly where a `.map` over a null throws. */
+const ADMIN_SESSION: Session = {
+  username: 'render-check', org_id: 'default', display_name: 'Render Check',
+  expires_at: new Date(0).toISOString(), is_admin: true,
+  must_change_password: false,
 }
 
 async function main() {
@@ -85,6 +97,13 @@ async function main() {
     ['Operations', () => <OperationsPanel findings={findings?.findings ?? []}
                                           changes={changes} />],
     ['Operations (empty)', () => <OperationsPanel findings={[]} changes={null} />],
+    // Both roles, because the administrator branch renders a table the plain
+    // branch never reaches — checking one proves nothing about the other.
+    ['Account (admin)', () => <AccountPanel session={ADMIN_SESSION} />],
+    ['Account (plain)', () =>
+      <AccountPanel session={{ ...ADMIN_SESSION, is_admin: false }} />],
+    ['First password change', () =>
+      <FirstPasswordChange session={ADMIN_SESSION} onChanged={() => {}} />],
   ]
 
   let failed = 0

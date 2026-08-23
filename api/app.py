@@ -506,10 +506,18 @@ TAXII_REGISTERED = _register_taxii(app)
 # Authentication. The middleware registered here binds tenancy.using(org) around
 # EVERY request, including routes written by somebody who has never heard of
 # tenancy — which is the failure mode P5 recorded and this closes.
+from api import account_routes as _account_routes       # noqa: E402
 from api import auth_routes as _auth_routes             # noqa: E402
 
 AUTH_REGISTERED = _auth_routes.register(app)
 BOOTSTRAPPED = _auth_routes.bootstrap_from_env()
+
+# Account administration. Registered unconditionally, unlike the auth routes:
+# every route inside re-checks `is_admin` on the session, so on an instance with
+# no users the middleware's own 401 covers them, and on one with users the
+# routes cover themselves. Registering conditionally would mean the endpoints a
+# user is told about in an error message might not exist.
+_account_routes.register(app)
 
 
 

@@ -499,3 +499,22 @@ tbody tr:hover { background: var(--panel2); }
   display: flex; flex-wrap: wrap; gap: var(--space-4);
   font-size: 11px; color: var(--ink2); align-items: center;
 }
+
+/* ── account administration ────────────────────────────────────────────────
+   Two small additions. `.whoami` sits in the topbar because signing out is one
+   of the few actions that must be reachable from every section without first
+   finding the right tab — a console people cannot leave is a console people
+   leave logged in.
+
+   `.fact` is deliberately not `.kpi`: a KPI is a 30px number, and a username
+   set at 30px reads as a headline rather than as a field on a form. */
+.whoami { display: flex; align-items: center; gap: var(--space-2); }
+
+.fact-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--ink3); margin: 0 0 4px;
+}
+.fact-value {
+  font-size: 15px; font-weight: 600; line-height: 1.3;
+  overflow-wrap: anywhere;
+}

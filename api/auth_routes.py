@@ -54,6 +54,20 @@ PUBLIC_PREFIXES = ("/api/v1/health", "/api/v1/auth/", "/assets/", "/taxii2/")
 PUBLIC_EXACT = ("/", "/favicon.png", "/skopos-logo.png", "/api/docs",
                 "/api/openapi.json")
 
+#: The only API paths a user who must change their password may reach.
+#:
+#: An account created by an administrator starts with a credential THE
+#: ADMINISTRATOR CHOSE AND HAS SEEN. Between creation and the first change it is
+#: not yet the user's own account, and a session on it must not be able to read
+#: the estate — otherwise 'create an account for a contractor' quietly means
+#: 'the administrator can read everything that contractor can, as them'.
+#:
+#: Enforced in the middleware for the reason this module's header already gives
+#: for the org binding: a route added by somebody who has not heard of this
+#: would otherwise serve it.
+LOCKED_ALLOWED = ("/api/v1/auth/session", "/api/v1/auth/logout",
+                  "/api/v1/account/password", "/api/v1/health")
+
 
 class _LoginBody(BaseModel):
     username: str
@@ -141,6 +155,20 @@ def register(app: FastAPI) -> bool:
                     content={"detail": "a session is required",
                              "login": "/api/v1/auth/login"})
 
+        if (session is not None and session.get("must_change_password")
+                and request.url.path.startswith("/api/")
+                and request.url.path not in LOCKED_ALLOWED):
+            # 403 rather than 401: the session is valid and re-authenticating
+            # would not help. The console reads `change_password` and shows the
+            # form instead of bouncing the user back to a login screen they
+            # have already passed.
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "this account is still using the password "
+                                   "an administrator issued, and cannot be "
+                                   "used until that is changed",
+                         "change_password": "/api/v1/account/password"})
+
         org = session["org_id"] if session else tenancy.current_org()
         # Bound for EVERY route, including ones written by somebody who has
         # never heard of tenancy. That is the point of doing it here.
@@ -209,7 +237,14 @@ def register(app: FastAPI) -> bool:
             raise HTTPException(status_code=401, detail="no session")
         return {"username": session["username"], "org_id": session["org_id"],
                 "display_name": session["display_name"],
-                "expires_at": session["expires_at"]}
+                "expires_at": session["expires_at"],
+                # The console renders the Accounts tab from this. It is a
+                # convenience for drawing, NOT the control: every account route
+                # re-checks the flag server-side, because a console that hides
+                # a button is not a console that stops the request.
+                "is_admin": bool(session.get("is_admin")),
+                "must_change_password": bool(
+                    session.get("must_change_password"))}
 
     @app.post("/api/v1/auth/logout", tags=["auth"])
     def logout(request: Request, response: Response) -> Dict[str, Any]:

@@ -328,7 +328,14 @@ def test_the_auth_tables_hold_no_tenant_data(tenanted):
         columns = {r[0] for r in cur.fetchall()}
     allowed = {"id", "org_id", "username", "password_hash", "display_name",
                "created_at", "created_by", "disabled_at", "last_login_at",
-               "totp_secret", "totp_enrolled_at", "totp_last_counter"}
+               "totp_secret", "totp_enrolled_at", "totp_last_counter",
+               # Added by 009_accounts.sql. Each is a fact about the ACCOUNT —
+               # who may administer, whether the issued password has been
+               # replaced, and when it last was. None of them records anything
+               # observed about an estate, which is the line this test draws.
+               # `is_admin` in particular grants no authority over any asset:
+               # `core/gate.py` never reads it.
+               "is_admin", "must_change_password", "password_changed_at"}
     assert columns == allowed, (
         f"app_user gained {columns - allowed}, which would be outside RLS")
 

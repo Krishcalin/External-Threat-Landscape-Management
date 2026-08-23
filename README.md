@@ -358,11 +358,29 @@ it also found only **one of four** latency reference classes has enough resolved
 samples to forecast from, so the other three refuse. P4 found that **seven of
 eight** CERT-In reportable categories are not observable from outside an estate.
 
-**The console** has twelve sections — Worklist, Operations, Executive, Crosshair,
-Graph, Lookup, Brand, Suppliers, Alerts, Compliance, Accuracy, and This
-instance. It is behind a login with TOTP two-factor. Operations,
+**The console** has thirteen sections — Worklist, Operations, Executive,
+Crosshair, Graph, Lookup, Brand, Suppliers, Alerts, Compliance, Accuracy, This
+instance, and Account. It is behind a login with TOTP two-factor. Operations,
 Executive and Worklist are the SRS's three projections of one graph, adjacent so
 it is obvious they are the same data asked three different questions.
+
+**Accounts are administered from the console, and the limits are stated rather
+than overclaimed.** An administrator cannot disable themselves or the last
+remaining administrator, because there is no recovery path from an instance with
+none. They cannot *choose* a password — every issued credential is generated, so
+the house pattern that makes every account on an instance guessable never forms.
+And `is_admin` appears nowhere in the authorisation path for scanning: creating
+accounts confers no authority over any estate, which stays gated on verified
+ownership for everybody.
+
+What an administrator **can** do is create an account, reset a forgotten
+password, disable an account, and clear a second-factor enrolment. The first two
+issue a one-time password shown exactly once, and until it is changed the account
+reaches nothing but the change form. **Resetting a password and a second factor
+together is a takeover** — that is true of every system where one person can do
+both, it is not preventable while they can, and SKOPOS says so on the screen
+instead of implying otherwise. Every account action is written to the
+hash-chained audit log; no issued password ever is.
 
 **Third parties are assessed passively, and cannot be assessed any other way.**
 A supplier's estate belongs to somebody else, the customer cannot prove

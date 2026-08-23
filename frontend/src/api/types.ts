@@ -425,6 +425,69 @@ export interface Session {
   org_id: string
   display_name: string
   expires_at: string
+  /** Whether to draw the Accounts section. NOT the control — every account
+   *  route re-checks this server-side, because hiding a button is not the same
+   *  as refusing a request. */
+  is_admin: boolean
+  /** Still using the password an administrator issued. While true the session
+   *  can reach the password form and nothing else. */
+  must_change_password: boolean
+}
+
+export interface AccountUser {
+  username: string
+  display_name: string
+  is_admin: boolean
+  disabled: boolean
+  second_factor: 'enrolled' | 'not enrolled'
+  must_change_password: boolean
+  created_at: string | null
+  created_by: string | null
+  last_login_at: string | null
+  is_you: boolean
+}
+
+export interface AccountSummary {
+  total: number
+  administrators: number
+  disabled: number
+  awaiting_second_factor: number
+  /** Either a colleague who never received their credential, or an account
+   *  nobody needed. Both want attention; neither shows up in a total. */
+  never_signed_in: number
+}
+
+export interface AccountList {
+  org_id: string
+  users: AccountUser[]
+  summary: AccountSummary
+}
+
+/** The response to a creation. `initial_password` is present exactly once and
+ *  is not retrievable afterwards — there is no endpoint that will repeat it. */
+export interface AccountCreated {
+  created: string
+  display_name: string
+  is_admin: boolean
+  initial_password: string
+  shown_once: boolean
+  next_steps: string[]
+}
+
+export interface PasswordChanged {
+  changed: boolean
+  other_sessions_revoked: number
+  note: string
+}
+
+/** A one-time password issued to somebody who forgot theirs. `note` states the
+ *  takeover path plainly and is rendered, not swallowed. */
+export interface PasswordReset {
+  username: string
+  initial_password: string
+  shown_once: boolean
+  next_steps: string[]
+  note: string
 }
 
 export interface PendingLogin {
