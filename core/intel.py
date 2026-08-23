@@ -58,9 +58,11 @@ class Corpus:
     reach past `entries()` into internals that are free to change.
     """
 
-    def __init__(self, kev: Dict[str, Any], epss: Dict[str, Any]) -> None:
+    def __init__(self, kev: Dict[str, Any], epss: Dict[str, Any],
+                 affected: Optional[Dict[str, Any]] = None) -> None:
         self._kev = kev
         self._epss = epss
+        self._affected = affected or {}
         self._entries: Optional[List[Exploited]] = None
 
     # ── provenance ──────────────────────────────────────────────────────────
@@ -88,6 +90,48 @@ class Corpus:
         """`all` or `KEV subset` — a stated boundary, so a caller asking for a
         score outside it gets None rather than a silent zero."""
         return str(self._epss.get("_meta", {}).get("scope") or "unknown")
+
+    # ── affected version ranges ─────────────────────────────────────────────
+    @property
+    def has_affected(self) -> bool:
+        """Is there any CNA range data at all?
+
+        Without it every result is a worklist entry, which is P1's behaviour and
+        remains correct — it is simply less useful, and the caller should be
+        able to say which of the two situations it is in.
+        """
+        return bool(self._affected.get("affected"))
+
+    @property
+    def determinable_share(self) -> Optional[float]:
+        """Fraction of the catalogue that CAN reach a version determination.
+
+        Measured at refresh time and carried in the artefact, because a reader
+        needs to know that roughly a third of the catalogue carries no
+        comparable version data at all and will stay a worklist permanently —
+        rather than inferring that the product is being timid.
+        """
+        value = self._affected.get("_meta", {}).get("determinable_share")
+        return float(value) if isinstance(value, (int, float)) else None
+
+    @property
+    def affected_retrieved(self) -> Optional[date]:
+        return _parse_date(self._affected.get("_meta", {}).get("retrieved_at"))
+
+    def affected_for(self, cve: str) -> List[Dict[str, Any]]:
+        """CNA affected-product statements for one CVE.
+
+        An empty list means one of two different things and the caller must not
+        conflate them: either the CNA published no comparable version data, or
+        this corpus has no range data at all. `has_affected` tells them apart.
+        """
+        records = self._affected.get("affected") or {}
+        return list(records.get(str(cve).strip().upper()) or [])
+
+    def version_ranges_for(self, cve: str) -> List[Dict[str, Any]]:
+        """Flattened version entries, ready for `core.affected.evaluate()`."""
+        return [v for product in self.affected_for(cve)
+                for v in (product.get("versions") or [])]
 
     # ── content ─────────────────────────────────────────────────────────────
     def entries(self) -> List[Exploited]:
@@ -145,4 +189,13 @@ def load(data_dir: Optional[str] = None) -> Corpus:
         # EPSS is optional: it orders the results and settles nothing, so its
         # absence degrades the ranking and not the answer.
         epss = json.loads(epss_path.read_text(encoding="utf-8"))
-    return Corpus(kev, epss)
+
+    # Affected ranges are optional too, and for a stronger reason: without them
+    # every result is a PRODUCT_MATCH worklist entry, which is exactly what P1
+    # shipped and is still correct. Their absence costs precision, never
+    # correctness, so it must not stop a scan.
+    affected: Dict[str, Any] = {}
+    affected_path = base / "affected.json"
+    if affected_path.exists():
+        affected = json.loads(affected_path.read_text(encoding="utf-8"))
+    return Corpus(kev, epss, affected)

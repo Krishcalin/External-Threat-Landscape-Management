@@ -168,6 +168,27 @@ def build_exposure_factors(asset: Asset,
     ), notes
 
 
+def _render_ranges(entries) -> str:
+    """The ranges a determination rests on, in words a reader can check.
+
+    Capped, and the cap announces itself — a truncated list of evidence that
+    does not say it was truncated reads as the whole basis for the verdict.
+    """
+    parts = []
+    for entry in entries[:3]:
+        low = str(entry.get("version") or "").strip()
+        if entry.get("lessThan"):
+            parts.append(f"{low} <= v < {entry['lessThan']}")
+        elif entry.get("lessThanOrEqual"):
+            parts.append(f"{low} <= v <= {entry['lessThanOrEqual']}")
+        elif low:
+            parts.append(f"= {low}")
+    rendered = "; ".join(parts) or "no comparable range"
+    if len(entries) > 3:
+        rendered += f"; and {len(entries) - 3} more"
+    return rendered
+
+
 def score_exposure(exposure: Exposure,
                    cloud: Optional[CloudAsset] = None,
                    external_reachable: Optional[bool] = None,
@@ -187,15 +208,30 @@ def score_exposure(exposure: Exposure,
         verdict = evaluate(asset.version, affected_versions)
         if verdict is Verdict.NOT_AFFECTED:
             # A published range says this version is not affected. That is a
-            # determination and it retires the finding rather than lowering it.
+            # determination and it RETIRES the finding rather than lowering it.
+            #
+            # Removing an entry from a customer's worklist is the most
+            # consequential thing this product does, so it is never silent: the
+            # ranges that produced it and the version they were compared against
+            # are recorded, and `retired_by` carries them in the finding.
             basis = MatchBasis.VERSION_RANGE
+            evidence.append(
+                f"RETIRED: version {asset.version} falls outside every "
+                f"published affected range for {entry.cve} "
+                f"({_render_ranges(affected_versions)})")
         elif verdict is Verdict.AFFECTED:
             basis = MatchBasis.VERSION_RANGE
             evidence.append(f"version {asset.version} falls in a published "
-                            f"affected range for {entry.cve}")
+                            f"affected range for {entry.cve} "
+                            f"({_render_ranges(affected_versions)})")
         else:
-            evidence.append("published affected ranges could not be compared "
-                            "against this version")
+            # UNKNOWN. "We compared and it does not apply" and "we could not
+            # compare" must never render alike — the first is a determination,
+            # the second leaves the worklist entry exactly where it was.
+            evidence.append(
+                "published affected ranges could not be compared against this "
+                + (f"version ({asset.version})" if asset.version
+                   else "asset, which carries no version"))
 
     exposure_factors, notes = build_exposure_factors(
         asset, cloud, external_reachable, days_exposed, shadow)
@@ -253,6 +289,15 @@ def rank(findings: Iterable[Finding]) -> List[Finding]:
                                  f.exploited.cve))
 
 
+def _is_retired(finding) -> bool:
+    """Did a published range take this finding off the worklist?
+
+    Read from the evidence rather than a flag, so a retirement that carries no
+    explanation cannot exist — the marker and the reason are the same string.
+    """
+    return any(str(e).startswith("RETIRED:") for e in finding.evidence)
+
+
 def summarise(findings: Sequence[Finding],
               unmatched: int = 0,
               unmappable: int = 0) -> Dict[str, Any]:
@@ -272,6 +317,19 @@ def summarise(findings: Sequence[Finding],
         "determinations": sum(1 for f in findings if f.match_confidence == "confirmed"),
         "worklist": sum(1 for f in findings if f.match_confidence != "confirmed"),
         "reconciliation": recon,
+        # The three-way split the determination tier produces. "We compared and
+        # it applies", "we compared and it does not" and "we could not compare"
+        # are different claims, and a single determination count hides the
+        # third — which is where roughly a third of the catalogue permanently
+        # sits, because its CNA published no comparable version data.
+        "version_verdicts": {
+            "affected": sum(1 for f in findings
+                            if f.basis is MatchBasis.VERSION_RANGE
+                            and not _is_retired(f)),
+            "retired": sum(1 for f in findings if _is_retired(f)),
+            "not_compared": sum(1 for f in findings
+                                if f.basis is not MatchBasis.VERSION_RANGE),
+        },
         # The two honesty counters. A console that shows findings without these
         # reads as a complete picture when it may be a partial one.
         "assets_matched_nothing": unmatched,

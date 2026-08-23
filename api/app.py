@@ -113,6 +113,11 @@ def intel_status() -> Dict[str, Any]:
         "entries": len(corpus),
         "epss_scope": corpus.epss_scope,
         "ransomware_linked": sum(1 for e in corpus.entries() if e.known_ransomware),
+        # Whether determinations are possible at all, and for how much of the
+        # catalogue. Without this a reader cannot tell a cautious product from
+        # one that simply has no range data vendored.
+        "affected_ranges": corpus.has_affected,
+        "determinable_share": corpus.determinable_share,
     }
 
 
@@ -156,17 +161,27 @@ def run_scan(inventory_path: str = Query(..., description="CSV or JSON asset inv
                                           geo_match=geo_match,
                                           tech_match=tech_match)
     catalogue = corpus.entries()
+    from core import reach
+
     findings = []
     for asset in assets:
         cloud = cloud_by_id.get(asset.identifier)
+        # Outside-in reachability, where a fingerprint run supplied it. None
+        # means never probed, which is not the same as probed-and-closed and
+        # must not reconcile as one.
+        reachable, _ports = reach.from_row(asset.attributes)
         for correspondence in match.match_asset(asset, catalogue):
             findings.append(engine.score_exposure(
                 correspondence,
                 cloud=cloud,
-                # SKOPOS has not probed anything yet — active discovery is a
-                # later phase — so external reachability is UNKNOWN rather than
-                # assumed. That keeps the reconciliation honest.
-                external_reachable=None,
+                external_reachable=reachable,
+                # THE DETERMINATION TIER. Passing this is what turns a
+                # PRODUCT_MATCH worklist entry into a VERSION_RANGE verdict —
+                # and, when a version falls outside every published range, what
+                # retires the finding entirely. It has been inert since the
+                # evaluator was written because nothing supplied ranges.
+                affected_versions=corpus.version_ranges_for(
+                    correspondence.exploited.cve),
                 adversary=adversary,
                 asset_tier=asset_tier,
                 days_exposed=days_exposed,
