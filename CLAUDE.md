@@ -196,19 +196,53 @@ and never establishes exploitation.
 ## Layout
 
 ```
-etlm/
-├── main.py                 CLI — `scan`, `intel`
+skopos/
+├── main.py                   CLI: scope, verify, discover, dns-sweep,
+│                             takeover, fingerprint, scan, intel
 ├── core/
-│   ├── models.py           Asset, Exploited, Exposure, MatchBasis, Confidence
-│   ├── intel.py            vendored corpus + staleness reporting
-│   ├── inventory.py        aliased CSV/JSON ingest; rejects are RETURNED
-│   └── match.py            the join, and what it refuses to claim
-├── data/
-│   ├── kev.json            CISA KEV, verbatim (public domain)
-│   └── epss.json           FIRST EPSS, KEV subset (stated boundary)
-├── tools/refresh_intel.py  regenerates data/; refuses partial catalogues
-├── sample_data/assets.csv
-└── tests/
+│   ├── gate.py               THE authorisation decision. Permit, authorise,
+│   │                         authorise_target, plan, OPERATIONS
+│   ├── scope.py              include/exclude; exclude wins unconditionally
+│   ├── ownership.py          verification records, 180-day expiry
+│   ├── audit.py              hash-chained log + what a chain cannot prove
+│   ├── provenance.py         whose statement a string is (obs_ prefix)
+│   ├── migrate.py            schema versioning; refuses to serve when behind
+│   ├── store.py              scope / ownership / audit  (Memory + Postgres)
+│   ├── dns_store.py          observations, sweeps, takeover findings
+│   ├── findings_store.py     scan runs, findings, run-over-run diff
+│   ├── models.py             Asset, Exploited, Exposure, MatchBasis, Confidence
+│   ├── intel.py              vendored corpus + staleness reporting
+│   ├── inventory.py          aliased CSV/JSON ingest; rejects are RETURNED
+│   ├── match.py              the join, and what it refuses to claim
+│   ├── affected.py           CNA range evaluation (the determination tier)
+│   ├── scoring.py            TEPS, SRS §9.1
+│   ├── engine.py             composition, ranking, summarising
+│   ├── overwatch.py          cloud ingest + four-way reconciliation
+│   ├── identity.py           Attestation, Fingerprint; the version refusal
+│   ├── signatures.py         banner -> catalogue spelling; vendor-span cap
+│   ├── reach.py              outside-in reachability: True / False / None
+│   ├── dns_state.py          change tracking; (rcode, digest) comparand
+│   ├── takeover.py           verdicts, mandatory evidence, the ceiling
+│   └── takeover_rules.py     provider catalogue + review dates
+├── collect/
+│   ├── egress.py             THE ONLY module that performs I/O
+│   ├── report.py             one degradation vocabulary for every subsystem
+│   ├── registry.py           sources, their terms, their defaults
+│   ├── discovery.py          merge, scope binding, date provenance
+│   ├── ct.py                 certificate transparency
+│   ├── names.py              passive DNS, name indexes, web archive
+│   ├── run.py                the only caller of authorise() for discovery
+│   ├── dns_wire.py           DNS packet build/parse (rcode, not gaierror)
+│   ├── dns_records.py        multi-resolver sweep + per-rrtype agreement
+│   ├── takeover_scan.py      dangling assessment + RDAP
+│   ├── http_probe.py         HTTP/TLS identity signals (active)
+│   └── fingerprint.py        the run, under permits, writing what joins
+├── api/app.py                FastAPI; serves the console same-origin
+├── frontend/                 React + TypeScript console
+├── db/                       001 schema · 002 DNS · 003 findings
+├── data/                     kev.json, epss.json — VERSIONED INPUTS
+├── docs/P1-BUILD-SPEC.md     the adversarial design pass, and its 86 problems
+└── tests/                    414 tests
 ```
 
 ---
@@ -222,29 +256,45 @@ etlm/
 - **Rejected rows are returned, never dropped.** "We read 380 of your 400 rows"
   is a materially different statement from "we read your inventory".
 - **An empty corpus raises.** `IntelUnavailable`, never a clean-looking zero — an
-  empty catalogue produces a report identical to a secure estate.
+  empty catalogue produces a report identical to a secure estate. Discovery
+  follows the same rule: a total source blackout raises rather than returning 0.
 - **Truncation says so.** A capped list that does not announce the cap reads as a
   complete one.
+- **Anything a collector writes is prefixed `obs_`.** That prefix is what stops
+  a third party's text being read as the customer's own assertion. See D13.
+- **Every network call goes through `collect/egress.py`.** Enforced by a test
+  over `# NETWORK-BOUNDARY:` markers, not by a filename allowlist.
+- **Meaning strings are served by the API**, never hard-coded in the console, so
+  the API, the CLI and the UI cannot drift into describing one state differently.
 
 ---
 
 ## Status
 
-**TEPS implemented and golden-tested against SRS §9.1** — the published worked
-example reproduces exactly at 78, with every intermediate factor matching
-(E=0.817, X=1.000, A=0.850, B=1.000). 28 tests.
+**P0 and P1 complete. 414 tests** (384 offline + 30 against a live PostgreSQL).
 
-**Phase 1 spine complete** — corpus, models, inventory ingest, matcher, CLI,
-8 tests. Verified end to end against the real catalogue (1,674 entries,
-version 2026.08.21).
+**TEPS golden-tested against SRS §9.1** — the published worked example reproduces
+exactly at 78, every intermediate factor matching (E=0.817, X=1.000, A=0.850,
+B=1.000).
+
+**Verified against reality, not fixtures.** Live CT and passive DNS discovery;
+live multi-resolver DNS sweeps (66 of 70 pairs observed, 4 genuine no-quorum
+disagreements); a real dangling record found on a real domain and correctly
+capped; findings surviving a container restart; migrations applied to the running
+volume. Several defects in this codebase were found only by running it against
+real services — they are named in the commit messages rather than quietly fixed.
 
 ### Next
 
-- [ ] NVD CPE affected ranges - the `VERSION_RANGE` determination (closes D3)
-- [ ] Run-over-run diff: what is *new* since the last scan
-- [ ] Wire the gate into the API and the console (routes + audit payloads)
-- [ ] Active collectors, which are now unable to run without a Permit
-- [ ] Tenancy (FR-M0-001): org_id on every table, RLS, and Postgres roles per org
+- [ ] NVD / cvelistV5 CNA affected ranges — the `VERSION_RANGE` determination
+      (closes D3, and is the only thing that turns a worklist into a verdict)
+- [ ] The forecast record: write every finding with its full input vector at the
+      moment it is issued, so a Brier score is possible later. History cannot be
+      backfilled — every week of delay is evidence that can never be recovered
+- [ ] Alerting, STIX 2.1 export, TAXII server
+- [ ] `Method.PARENT_ZONE`, which would unlock active takeover corroboration —
+      specified in `docs/P1-BUILD-SPEC.md` §11, deferred by sponsor decision
+- [ ] Tenancy (FR-M0-001): org_id on every table, RLS, Postgres roles per org
 
 ---
 
