@@ -84,13 +84,20 @@ def test_a_homoglyph_substitution_is_caught():
     assert Signal.HOMOGLYPH in found.signals or Signal.EXACT_TERM in found.signals
 
 
-def test_a_cctld_variant_does_not_gain_a_subdomain_signal():
-    """Without a suffix list, hdfcbank.co.uk read as the brand being a subdomain
-    of somebody else's `co.uk` and gained a signal it had not earned —
-    inflating a legitimate variant toward the reporting threshold."""
-    found = lookalike.assess("hdfcbank.co.uk", brand(), RECENT, TODAY)
-    assert found is not None
-    assert Signal.BRAND_AS_SUBDOMAIN not in found.signals
+def test_a_cctld_variant_is_silent_entirely():
+    """Two fixes converge here, and the second superseded the first.
+
+    Originally hdfcbank.co.uk gained a spurious BRAND_AS_SUBDOMAIN — with no
+    suffix list it read as the brand sitting under somebody else's `co.uk` —
+    which inflated a legitimate variant toward the threshold. The suffix list
+    removed that signal.
+
+    Then the strong-signal rule removed the candidate outright: exact_term and
+    recent are both weak, so a legitimate ccTLD variant now produces nothing at
+    all rather than a low-strength row somebody has to dismiss. That is the
+    better outcome, and this test asserts the stronger claim.
+    """
+    assert lookalike.assess("hdfcbank.co.uk", brand(), RECENT, TODAY) is None
 
 
 def test_a_genuine_subdomain_of_somebody_else_still_fires():
@@ -209,3 +216,87 @@ def test_secrets_scanning_defers_rather_than_duplicating():
     source = inspect.getsource(api_app.secrets_scanning)
     assert "Secrets Scanner" in source
     assert "second corpus here would drift" in source
+
+
+# ── the measurement that reshaped this ──────────────────────────────────────
+def test_a_candidate_needs_a_signal_of_deliberate_confusion():
+    """Measured on 823 real Tata-group hostnames: a flat two-signal threshold
+    flagged 97 of them, every one the customer's own infrastructure. They
+    cleared it on combinations of exact_term, recent and harvest_word — none of
+    which distinguishes a subsidiary from an impersonator."""
+    b = brand(terms=("tata",), owned=("tata.com",))
+    for legitimate in ("tslguestportal.corp.tatasteel.com",
+                       "inslportaltest.tatapower.com",
+                       "aashiyanatransact.test.tatasteel.com",
+                       "mytatamotors.tatamotors.com",
+                       "be-uatmytatapowerplus.tatapower.com"):
+        assert lookalike.assess(legitimate, b, RECENT, TODAY) is None, legitimate
+
+
+@pytest.mark.parametrize("name", [
+    "tata-secure-login.xyz", "tata.com.verify-account.top", "t4ta.com",
+    "tatabank.online", "login.tata.evil.xyz", "tata.com.secure.tk",
+])
+def test_impersonation_shapes_survive_the_tightened_threshold(name):
+    """Tightening for false positives must not silence the real thing."""
+    b = brand(terms=("tata",), owned=("tata.com",))
+    assert lookalike.assess(name, b, RECENT, TODAY) is not None, name
+
+
+def test_the_weak_signals_are_named_as_weak():
+    assert "WEAK on its own" in Signal.EXACT_TERM.means
+    assert "WEAK on its own" in Signal.RECENT.means
+    for weak in ("exact_term", "recent", "harvest_word"):
+        assert weak not in lookalike.STRONG_SIGNALS, weak
+
+
+def test_brand_as_subdomain_needs_an_innocent_registration():
+    """A subdomain of tatamotors.com containing "tata" is one organisation's
+    naming convention, not somebody hiding a brand on the left of an address
+    bar. But tata.com.verify.top has a registration carrying no trace of it."""
+    b = brand(terms=("tata",), owned=("tata.com",))
+    inside = lookalike.assess("mytatamotors.tatamotors.com", b, RECENT, TODAY)
+    assert inside is None
+    outside = lookalike.assess("tata.com.verify.top", b, RECENT, TODAY)
+    assert outside is not None
+    assert Signal.BRAND_AS_SUBDOMAIN in outside.signals
+
+
+# ── one row per registration ────────────────────────────────────────────────
+def test_results_are_grouped_by_registration_not_by_hostname():
+    """823 hostnames collapsed to 6 registrations. "Is this domain yours?" is
+    answerable at 6 and unanswerable at 823."""
+    b = brand(terms=("tata",), owned=("tata.com",))
+    names = [("login.tata.evil.xyz", RECENT),
+             ("www.login.tata.evil.xyz", RECENT),
+             ("mail.tata.evil.xyz", RECENT)]
+    report = lookalike.build(b, names, searched=True, today=TODAY)
+    assert len(report.candidates) == 1
+    assert report.candidates[0].registration == "evil.xyz"
+
+
+def test_the_strongest_hostname_is_kept_as_evidence():
+    b = brand(terms=("tata",), owned=("tata.com",))
+    names = [("tata.evil.xyz", RECENT),
+             ("tata.com.secure-login.evil.xyz", RECENT)]
+    report = lookalike.build(b, names, searched=True, today=TODAY)
+    assert len(report.candidates) == 1
+    assert "secure-login" in report.candidates[0].name
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("a.b.example.com", "example.com"),
+    ("example.com", "example.com"),
+    ("www.hdfcbank.co.uk", "hdfcbank.co.uk"),
+    ("deep.sub.hdfcbank.co.in", "hdfcbank.co.in"),
+])
+def test_registrable_handles_multi_part_suffixes(name, expected):
+    assert lookalike.registrable(name) == expected
+
+
+def test_the_registration_reaches_the_payload():
+    """It is what a customer answers about."""
+    b = brand(terms=("tata",), owned=("tata.com",))
+    report = lookalike.build(b, [("login.tata.evil.xyz", RECENT)],
+                             searched=True, today=TODAY)
+    assert report.to_dict()["candidates"][0]["registration"] == "evil.xyz"

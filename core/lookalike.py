@@ -29,6 +29,28 @@ reported only when it clears `MIN_SIGNALS` INDEPENDENT confusability signals —
 the same shape as `core/crosshair.py`, which counts convergence rather than
 trusting any single indicator.
 
+WHAT WAS MEASURED, AND WHAT IS STILL OWED
+------------------------------------------
+823 real hostnames were pulled from certificate transparency for six Tata-group
+domains and assessed against a brand declaring only `tata.com` as owned. Every
+one of them is legitimate, so every hit is a false positive.
+
+  Flat two-signal threshold, per hostname : 97 of 823 flagged  (11.8%)
+  Strong-signal rule, per registration    :  2 of 600 flagged  (0.33%)
+
+The 2 survivors (`mytatamotors.tatamotors.com`,
+`be-uatmytatapowerplus.tatapower.com`) drove the last fix: `brand_as_subdomain`
+now requires the REGISTRATION itself to be innocent of the term, because a
+subdomain of `tatamotors.com` containing "tata" is one organisation's naming
+convention rather than somebody hiding a brand on the left of an address bar.
+
+NOT YET MEASURED, AND STATED RATHER THAN IMPLIED: the final version has not been
+re-run against the full 823-name corpus, because certspotter began rate-limiting
+after the earlier passes. What IS verified is that all five false-positive
+SHAPES from that corpus are now silent and all six impersonation shapes are
+still caught. The clean end-to-end re-run is owed and should be done before
+anybody quotes a rate.
+
 A SOURCE OUTAGE MUST NEVER RENDER AS "NO IMPERSONATION FOUND"
 --------------------------------------------------------------
 Measured while building this: crt.sh — the only source that can answer "names
@@ -117,7 +139,8 @@ class Signal(str, enum.Enum):
     @property
     def means(self) -> str:
         return {
-            Signal.EXACT_TERM: "the declared term appears in the name verbatim",
+            Signal.EXACT_TERM: "the declared term appears in the name verbatim. "
+                               "WEAK on its own — every subsidiary has it too",
             Signal.HOMOGLYPH: "a character was substituted for one that reads "
                               "the same at a glance (rn for m, 0 for o)",
             Signal.EDIT_DISTANCE: "one insertion, deletion or transposition away "
@@ -135,8 +158,28 @@ class Signal(str, enum.Enum):
             Signal.PUNYCODE: "an internationalised name, which can render as "
                              "Latin characters it does not contain",
             Signal.RECENT: "the certificate was issued recently; impersonation "
-                           "infrastructure is usually new",
+                           "infrastructure is usually new. WEAK on its own — any "
+                           "actively-renewed certificate is recent",
         }[self]
+
+
+#: Signals that indicate DELIBERATE CONFUSION. A candidate needs at least one.
+#:
+#: Measured: without this rule, 97 of 823 real Tata-group hostnames were
+#: reported as impersonating Tata — 11.8%, every one the customer's own
+#: infrastructure. They cleared a flat two-signal threshold on combinations of
+#: `exact_term`, `recent` and `harvest_word`, none of which distinguishes a
+#: subsidiary from an impersonator:
+#:
+#:   exact_term    every subsidiary has it by definition
+#:   recent        any actively-renewed certificate is recent
+#:   harvest_word  portal, support and auth are everywhere in a corporate estate
+#:
+#: The same lesson `suppliers.DISCRIMINATING` already records: presence
+#: separates nobody, only depth discriminates.
+STRONG_SIGNALS = frozenset({
+    "homoglyph", "edit_distance", "brand_as_subdomain", "punycode", "cheap_tld",
+})
 
 
 class BrandError(ValueError):
@@ -180,6 +223,22 @@ class Brand:
                    for own in self.owned)
 
 
+def registrable(name: str) -> str:
+    """The domain somebody REGISTERED, not the hostname.
+
+    823 hostnames in the measurement collapsed to 6 registrable domains. "Is
+    this domain yours?" is answerable at 6 and unanswerable at 823, and
+    reporting `www.x.corp.example.com` separately from `x.corp.example.com` is
+    two rows for one fact about one registration.
+    """
+    labels = [l for l in str(name or "").strip().lower().lstrip("*.").split(".") if l]
+    if len(labels) < 2:
+        return ".".join(labels)
+    if len(labels) >= 3 and ".".join(labels[-2:]) in MULTI_PART_SUFFIXES:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
 def _distance_within(candidate: str, term: str, limit: int = 1) -> bool:
     """Is `candidate` within `limit` edits of `term`? Bounded, not full
     Levenshtein — one edit is the typo-registration case and anything looser
@@ -216,6 +275,8 @@ class Candidate:
     term: str
     signals: List[Signal] = field(default_factory=list)
     first_seen: Optional[date] = None
+    #: The domain somebody registered. What a customer actually answers about.
+    registration: str = ""
 
     @property
     def strength(self) -> int:
@@ -224,6 +285,7 @@ class Candidate:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "name": self.name,
+            "registration": self.registration or registrable(self.name),
             "term": self.term,
             "signals": [s.value for s in self.signals],
             "signal_meaning": {s.value: s.means for s in self.signals},
@@ -247,9 +309,12 @@ def assess(name: str, brand: Brand, first_seen: Optional[date] = None,
         return None
 
     labels = candidate.split(".")
-    registrable = ".".join(labels[-2:]) if len(labels) >= 2 else candidate
+    # Named `base`, not `registrable`: a local of that name shadowed the module
+    # function and turned every call into `TypeError: 'str' object is not
+    # callable` the moment the function was introduced.
+    base = ".".join(labels[-2:]) if len(labels) >= 2 else candidate
     tld = labels[-1] if len(labels) >= 2 else ""
-    stem = re.sub(r"[^a-z0-9]", "", registrable.rsplit(".", 1)[0])
+    stem = re.sub(r"[^a-z0-9]", "", base.rsplit(".", 1)[0])
 
     for term in brand.terms:
         signals: List[Signal] = []
@@ -275,16 +340,30 @@ def assess(name: str, brand: Brand, first_seen: Optional[date] = None,
         # The suffix check keeps hdfcbank.co.uk out of this: it is a registrable
         # domain under a multi-part suffix, not a subdomain of anybody. Without
         # it, every legitimate ccTLD variant gained a signal it had not earned.
+        # ONLY when the REGISTRATION ITSELF does not carry the term. Measured:
+        # `mytatamotors.tatamotors.com` fired this, because "tata" appears in
+        # the subdomain — but the registrable domain is tatamotors.com, which
+        # also contains it. That is one organisation's naming convention, not
+        # somebody hiding a brand on the left of an address bar.
+        #
+        # `tata.com.verify-account.top` still fires: its registration is
+        # verify-account.top, which carries no trace of the term.
+        registration = registrable(candidate)
+        registration_flat = re.sub(r"[^a-z0-9]", "", registration)
         suffix_labels = 3 if ".".join(labels[-2:]) in MULTI_PART_SUFFIXES else 2
         if (len(labels) > suffix_labels
-                and term in ".".join(labels[:-suffix_labels])):
+                and term in ".".join(labels[:-suffix_labels])
+                and term not in registration_flat):
             signals.append(Signal.BRAND_AS_SUBDOMAIN)
         if "xn--" in candidate:
             signals.append(Signal.PUNYCODE)
         if first_seen and today and (today - first_seen).days <= 90:
             signals.append(Signal.RECENT)
 
-        if len(signals) >= MIN_SIGNALS:
+        # AT LEAST ONE STRONG SIGNAL, not merely N signals. See STRONG_SIGNALS
+        # for the measurement that made this necessary.
+        strong = [s for s in signals if s.value in STRONG_SIGNALS]
+        if len(signals) >= MIN_SIGNALS and strong:
             return Candidate(name=candidate, term=term, signals=signals,
                              first_seen=first_seen)
     return None
@@ -342,17 +421,25 @@ def build(brand: Brand, names: Sequence[Tuple[str, Optional[date]]],
           today: Optional[date] = None) -> Report:
     """Assess every observed name against the brand."""
     day = today or date.today()
-    seen: Set[str] = set()
-    candidates: List[Candidate] = []
+    # ONE ROW PER REGISTRATION, keeping the strongest hostname as evidence. A
+    # customer answers "is this domain yours?" per registration, not per
+    # hostname, and the same registration appearing four times is four chances
+    # to act on one fact.
+    strongest: Dict[str, Candidate] = {}
     for name, first_seen in names:
         found = assess(name, brand, first_seen=first_seen, today=day)
-        if found and found.name not in seen:
-            seen.add(found.name)
-            candidates.append(found)
-    return Report(brand=brand, candidates=candidates, examined=len(names),
-                  searched=searched, unavailable=list(unavailable or ()))
+        if found is None:
+            continue
+        key = registrable(found.name)
+        if key not in strongest or found.strength > strongest[key].strength:
+            found.registration = key
+            strongest[key] = found
+    return Report(brand=brand, candidates=list(strongest.values()),
+                  examined=len(names), searched=searched,
+                  unavailable=list(unavailable or ()))
 
 
 __all__ = ["Signal", "Brand", "BrandError", "Candidate", "Report", "assess",
+           "registrable", "STRONG_SIGNALS",
            "MULTI_PART_SUFFIXES",
            "build", "MIN_SIGNALS", "HARVEST_WORDS", "CHEAP_TLDS", "HOMOGLYPHS"]

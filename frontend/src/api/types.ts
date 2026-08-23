@@ -517,3 +517,47 @@ export interface SourceCatalogue {
   terms_reviewed_on: string
   note: string
 }
+
+/* ── brand imitation ───────────────────────────────────────────────────────
+ * `searched` is the most important field here. Zero candidates from a
+ * successful search and zero because no source could be asked are different
+ * answers, and zero is what a customer hopes to see. */
+
+export interface LookalikeCandidate {
+  name: string
+  /** The domain somebody REGISTERED — what a customer actually answers about. */
+  registration: string
+  term: string
+  signals: string[]
+  signal_meaning: Record<string, string>
+  strength: number
+  first_seen: string | null
+  /** On every row, because a row is what gets copied into a takedown request. */
+  not_a_verdict: string
+}
+
+export interface LookalikeReport {
+  headline: string
+  /** False means NOTHING was asked. Never render this as "none found". */
+  searched: boolean
+  examined: number
+  candidates: LookalikeCandidate[]
+  minimum_signals: number
+  unavailable_sources: { source: string; why: string; cost: string }[]
+  signal_meaning: Record<string, string>
+  never_a_verdict: string
+  terms: string[]
+  owned: string[]
+}
+
+export interface BreachReport {
+  address: string
+  source: string
+  available: boolean
+  answered: boolean
+  observations: Record<string, unknown>[]
+  detail: string
+  verified_live: boolean
+  caveat: string | null
+  what_this_does_not_say: string
+}

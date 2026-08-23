@@ -1,6 +1,7 @@
 import type { Accuracy, AlertsView, CertInStatus, CiiRegister,
               ControlMapping, CrosshairView, DnsRunsPage, FindingsPage,
               ChangesView, IntelStatus, LatencyReport, RunsPage, Summary,
+              BreachReport, LookalikeReport,
               LookupResult, SourceCatalogue,
               SupplierRegister, Tenancy } from './types'
 
@@ -107,3 +108,34 @@ export async function lookupTarget(target: string, actor: string) {
 }
 
 export const lookupSources = () => get<SourceCatalogue>('/lookup/sources')
+
+/* ── brand and identity exposure ───────────────────────────────────────────
+ * Both POST: each performs outbound lookups, and every permit names an actor. */
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`/api/v1${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    let detail: unknown = response.statusText
+    try { detail = (await response.json()).detail } catch { /* keep status */ }
+    const message = typeof detail === 'string'
+      ? detail
+      : (detail as { error?: string })?.error ?? response.statusText
+    throw new ApiError(response.status, message)
+  }
+  return response.json() as Promise<T>
+}
+
+export const brandLookalikes = (terms: string[], owned: string[], declaredBy: string) =>
+  post<LookalikeReport>('/brand/lookalikes',
+    { terms, owned, declared_by: declaredBy })
+
+export const accountBreaches = (address: string, actor: string) =>
+  post<BreachReport>('/identity/breaches', { address, actor })
+
+export const secretsScanning = () =>
+  get<{ supported: boolean; reason: string; integration: string;
+        what_skopos_does_contribute: string }>('/identity/secrets-scanning')
