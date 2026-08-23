@@ -44,11 +44,12 @@ import csv
 import gzip
 import io
 import json
+import re
 import sys
 import urllib.request
 from datetime import datetime, timezone
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, Iterable
 
@@ -70,6 +71,21 @@ CVE_API = "https://cveawg.mitre.org/api/cve/{cve}"
 #: by nobody's subscription, and a refresh is a human-initiated act with no
 #: deadline attached to it.
 CVE_INTERVAL = 0.12
+
+#: Exploit-artefact indexes. Each is a single file, so these are cheap compared
+#: with the per-CVE affected fetch.
+EXPLOITDB_URL = ("https://gitlab.com/exploit-database/exploitdb/-/raw/main/"
+                 "files_exploits.csv")
+METASPLOIT_URL = ("https://raw.githubusercontent.com/rapid7/"
+                  "metasploit-framework/master/db/modules_metadata_base.json")
+NUCLEI_URL = ("https://raw.githubusercontent.com/projectdiscovery/"
+              "nuclei-templates/main/cves.json")
+
+#: GitHub PoC search is deliberately NOT a source. Repositories named for a CVE
+#: routinely contain nothing, the search needs an authenticated and rate-limited
+#: API, and Exploit-DB, Metasploit and Nuclei already carry the observation that
+#: working code exists. Adding a noisy fourth source would degrade the signal
+#: the other three provide.
 
 #: Deliberately generous. These are large files from public infrastructure and a
 #: refresh is a human-initiated act, not something on a scan's critical path.
@@ -232,6 +248,103 @@ def _is_usable_version(entry: Dict) -> bool:
     return parse_version(version) is not None
 
 
+_CVE_IN_TEXT = re.compile(r"CVE-\d{4}-\d{4,7}", re.I)
+
+
+def _artefact_date(text) -> str:
+    """An ISO date from a source's own field, or empty.
+
+    Never inferred. A weaponisation latency computed from a guessed date is
+    worse than no latency at all, because it looks like a measurement.
+    """
+    raw = str(text or "").strip()
+    for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(raw[:19] if "T" in raw else raw,
+                                     fmt).date().isoformat()
+        except ValueError:
+            continue
+    return ""
+
+
+def fetch_artefacts(only: Iterable[str] | None = None) -> Dict:
+    """Published exploit code and detection templates, per CVE.
+
+    Scoped to the KEV subset by default, for the same reason EPSS is: the join
+    only ever asks about catalogue entries, and a vendored artefact index for
+    every CVE ever published would be large and almost entirely unused.
+    """
+    wanted = {str(c).strip().upper() for c in only} if only is not None else None
+    artefacts: Dict[str, list] = {}
+    reports: Dict[str, str] = {}
+
+    def add(cve: str, kind: str, published: str, reference: str) -> None:
+        key = str(cve).strip().upper()
+        if not key or (wanted is not None and key not in wanted):
+            return
+        entries = artefacts.setdefault(key, [])
+        if any(e["kind"] == kind for e in entries):
+            return                      # one row per kind per CVE
+        entries.append({"kind": kind, "published": published,
+                        "reference": reference[:200]})
+
+    # ---- Exploit-DB: a CSV index with its own codes column ----------------
+    try:
+        text = _get(EXPLOITDB_URL).decode("utf-8", "replace")
+        rows = list(csv.DictReader(io.StringIO(text)))
+        for row in rows:
+            for cve in _CVE_IN_TEXT.findall(str(row.get("codes") or "")):
+                add(cve, "exploitdb", _artefact_date(row.get("date_published")),
+                    f"https://www.exploit-db.com/exploits/{row.get('id','')}")
+        reports["exploitdb"] = f"ok ({len(rows):,} rows)"
+    except Exception as exc:                       # noqa: BLE001
+        reports["exploitdb"] = f"FAILED: {type(exc).__name__}"
+
+    # ---- Metasploit: module metadata, `references` carries CVE ids --------
+    try:
+        modules = json.loads(_get(METASPLOIT_URL).decode("utf-8", "replace"))
+        for path, module in modules.items():
+            refs = module.get("references") or []
+            for ref in refs:
+                text = str(ref)
+                if text.upper().startswith("CVE-"):
+                    add(text.split(",")[0], "metasploit",
+                        _artefact_date(module.get("disclosure_date")),
+                        f"metasploit:{path}")
+        reports["metasploit"] = f"ok ({len(modules):,} modules)"
+    except Exception as exc:                       # noqa: BLE001
+        reports["metasploit"] = f"FAILED: {type(exc).__name__}"
+
+    # ---- Nuclei: one JSON object per line, keyed by CVE id ----------------
+    try:
+        body = _get(NUCLEI_URL).decode("utf-8", "replace")
+        count = 0
+        for line in body.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            count += 1
+            add(str(entry.get("ID") or ""), "nuclei",
+                _artefact_date((entry.get("Info") or {}).get("Classification", {})
+                               .get("published") if isinstance(
+                                   (entry.get("Info") or {}).get("Classification"),
+                                   dict) else ""),
+                f"nuclei:{entry.get('File') or entry.get('ID')}")
+        reports["nuclei"] = f"ok ({count:,} templates)"
+    except Exception as exc:                       # noqa: BLE001
+        reports["nuclei"] = f"FAILED: {type(exc).__name__}"
+
+    if all(r.startswith("FAILED") for r in reports.values()):
+        raise SystemExit("every artefact source failed; refusing to overwrite "
+                         "the vendored copy with an empty one")
+
+    return {"sources": reports, "artefacts": artefacts}
+
+
 def write(path: Path, payload: Dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
@@ -249,6 +362,8 @@ def main(argv=None) -> int:
     parser.add_argument("--skip-affected", action="store_true",
                         help="do not refresh data/affected.json (it takes a "
                              "few minutes: one request per KEV CVE)")
+    parser.add_argument("--skip-artefacts", action="store_true",
+                        help="do not refresh data/artefacts.json")
     parser.add_argument("--check", action="store_true",
                         help="report whether the vendored copy is current "
                              "without writing anything")
@@ -324,6 +439,33 @@ def main(argv=None) -> int:
             },
             "failures": affected["failures"],
             "affected": affected["affected"],
+        })
+
+    if not args.skip_artefacts:
+        print("Fetching exploit artefacts (Exploit-DB, Metasploit, Nuclei)…")
+        artefacts = fetch_artefacts(cves)
+        for name, state in artefacts["sources"].items():
+            print(f"  {name:12} {state}")
+        covered = len(artefacts["artefacts"])
+        print(f"  {covered:,} of {len(cves):,} KEV CVEs have a published artefact")
+        write(DATA / "artefacts.json", {
+            "_meta": {
+                "sources": {"exploitdb": EXPLOITDB_URL,
+                            "metasploit": METASPLOIT_URL,
+                            "nuclei": NUCLEI_URL},
+                "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "scope": "KEV subset",
+                "reports": artefacts["sources"],
+                "covered": covered,
+                "note": "An artefact is an OBSERVATION that working code "
+                        "exists; EPSS is a FORECAST that exploitation will "
+                        "happen. They are correlated and are not the same "
+                        "claim. This does not change a TEPS while the corpus "
+                        "is KEV-only — Exploitability short-circuits to 1.0 on "
+                        "KEV membership — and is carried for weaponisation "
+                        "latency and for evidence a defender can act on.",
+            },
+            "artefacts": artefacts["artefacts"],
         })
 
     write(DATA / "epss.json", {
