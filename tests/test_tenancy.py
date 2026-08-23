@@ -299,10 +299,38 @@ def test_every_tenanted_table_has_a_policy(tenanted):
               AND NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid)
         """)
         unprotected = {r[0] for r in cur.fetchall()}
-    # epss_history is deliberately global: an EPSS score is a public fact about
-    # a CVE, identical for every tenant, and per-tenant copies would leave a
-    # tenant whose snapshot job never ran with no velocity data at all.
-    assert unprotected == {"epss_history"}, unprotected
+    # TWO documented exceptions, and this assertion is written as an exact set
+    # so a THIRD one cannot appear without somebody having to justify it here.
+    #
+    # epss_history: an EPSS score is a public fact about a CVE, identical for
+    # every tenant. Per-tenant copies would leave a tenant whose snapshot job
+    # never ran with no velocity data while the row it needed sat in the table.
+    #
+    # app_user: the login route runs BEFORE any org is known - resolving the org
+    # is what it is for - so a policy keyed on the session GUC would hide the
+    # very row the username lookup needs. The protection is different in kind:
+    # the table holds no findings, no assets and no customer data, only hashes,
+    # and the lookup is by username alone. What it must never gain is a column
+    # carrying tenant data, because that column would sit outside RLS.
+    assert unprotected == {"epss_history", "app_user"}, unprotected
+
+
+@live
+def test_the_auth_tables_hold_no_tenant_data(tenanted):
+    """app_user sits outside row-level security, so what it may hold is
+    constrained instead. A column carrying findings, assets or any customer
+    observation would be tenant data with no policy over it."""
+    import psycopg
+    admin_dsn, _ = tenanted
+    with psycopg.connect(admin_dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT column_name FROM information_schema.columns"
+                    " WHERE table_name = 'app_user'")
+        columns = {r[0] for r in cur.fetchall()}
+    allowed = {"id", "org_id", "username", "password_hash", "display_name",
+               "created_at", "created_by", "disabled_at", "last_login_at",
+               "totp_secret", "totp_enrolled_at", "totp_last_counter"}
+    assert columns == allowed, (
+        f"app_user gained {columns - allowed}, which would be outside RLS")
 
 
 @live
