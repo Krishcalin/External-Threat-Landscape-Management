@@ -334,6 +334,7 @@ prediction claim the backtesting harness cannot support.
 | **README.md** (this file) | what the product is, and how to run it |
 | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | how it is built: the gate, the egress boundary, the pipeline, storage, the module map, and the invariants |
 | **CLAUDE.md** | decisions D1–D19 with the reasoning and the measurements behind each |
+| **[docs/P2-SCOPE.md](docs/P2-SCOPE.md)** | what P2 will build, what it measured first, and the open decisions |
 | **docs/P1-BUILD-SPEC.md** | the adversarial design pass over P1, and the 86 problems it raised |
 
 [↑ Contents](#contents)
