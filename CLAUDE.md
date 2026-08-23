@@ -242,7 +242,7 @@ skopos/
 ├── db/                       001 schema · 002 DNS · 003 findings
 ├── data/                     kev.json, epss.json — VERSIONED INPUTS
 ├── docs/P1-BUILD-SPEC.md     the adversarial design pass, and its 86 problems
-└── tests/                    839 tests
+└── tests/                    1,081 tests
 ```
 
 ---
@@ -271,7 +271,7 @@ skopos/
 
 ## Status
 
-**P0 through P6 complete. 839 tests** (776 offline + 63 against a live
+**P0 through P7 complete. 1,081 tests** (1,018 offline + 63 against a live
 PostgreSQL).
 
 **TEPS golden-tested against SRS §9.1** — the published worked example reproduces
@@ -769,6 +769,67 @@ Stated limit: `helm lint` and `helm template` have NOT been run, because helm is
 not installed here. The chart is structurally validated - YAML parses, template
 delimiters balance, no secret carries a default - and it has not been rendered
 by helm.
+
+**D45 - P7 shipped auth, ad-hoc lookup, brand imitation and the graph, and every
+one of them was reshaped by a measurement.** The pattern is now the point rather
+than an anecdote:
+
+| Built | Measurement | What changed |
+|---|---|---|
+| TOTP pending token | 6.2% of 16-byte MACs contain 0x2E | delimiter split replaced by fixed width; one login in sixteen was failing |
+| Lookup posture | 0 of 9 inventory rows carry package coordinates | the advisory route reports WHICH assets and why, never an empty list |
+| Lookalike detection | 97 of 823 real Tata-group names flagged | strong-signal rule plus per-registration grouping: 97 -> 2 |
+| Exposure graph | every finding carried reconciliation null | the unexplained edge has THREE states; undrawable is not absent |
+| Licensed sources | crt.sh 502 on its own homepage | `searched` returned separately, so an outage cannot read as "no impersonation" |
+
+**D46 - one scan implementation, because two would drift.** `run_scan` was 178
+lines inside a route handler, and those lines carry the alerting decision, the
+ticketing decision and the forecast record. A scheduled scan that reimplemented
+them would have agreed on the day it was written and stopped agreeing quietly —
+which is exactly what four stale `ON CONFLICT` targets and one unapplied
+migration already did in this repository.
+
+So `core/scan.py` holds it and the route is 33 lines of parameter handling. The
+extraction is a STRONGER guarantee than the arrangement it replaced: delivery
+and ticketing are decided inside the shared implementation and neither surface
+takes a parameter that could request them, so no caller — HTTP or cron — can
+choose the moment the estate is described to a third party. Three existing tests
+were updated to assert that at the new location, and each now asserts more than
+it did.
+
+The extraction's static analysis immediately found a bug I had introduced an
+hour earlier and not yet exercised: a `replace(..., 1)` intended for the
+advisories route had landed on `"rows_rejected"` in `run_scan`, which has the
+same key, leaving a `source_coverage` line referencing undefined names. Any scan
+would have raised NameError. It had not been run since.
+
+**D47 - the third orphan pair, found by a proper import graph.** `core/coverage.py`
+and `collect/advisories.py` import each other and nothing else imported either —
+359 lines and 22 tests unreachable. A naive grep flagged only one half; a real
+reachability walk from the entry points found both. 66 of 66 modules now reach
+an entry point.
+
+Wiring it was worth doing precisely BECAUSE it returns nothing on the sample
+data: OSV joins on an ecosystem and an exact package name, 0 of 9 inventory rows
+carry them, and that fact was buried in an unreachable module. The route now
+names the assets that could not be looked up and says what to add.
+
+**D48 - nothing re-scanned without a person, in a monitoring product.** Measured:
+every `scan_run` row traced to a named human, and `daily.sh` ran only the EPSS
+snapshot and forecast resolution. The README says run-over-run diff "is most of
+what makes a monitoring product worth running continuously"; it existed and only
+fired on request.
+
+`tools/scheduled_scan.py` closes that, inert until `SKOPOS_SCAN_INVENTORY` names
+an inventory — and when it is unset it SAYS the job did not run, because a
+scheduler with no inventory is a misconfiguration rather than an estate with
+nothing in it. It also warns when `forecasts_recorded` is 0 or -1: a scan that
+completes while the record is not accumulating looks identical to one that is,
+and the difference surfaces months later when there is nothing to score.
+
+It does not go through HTTP. The console requires a session, and a cron job
+holding a login would mean storing a machine credential — a worse thing to own
+than a direct call as the unprivileged database role it already runs as.
 
 ## Running it
 

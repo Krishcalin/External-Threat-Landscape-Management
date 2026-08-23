@@ -25,6 +25,12 @@ while true; do
   echo "[skopos-scheduler] $(date -u +%Y-%m-%dT%H:%M:%SZ) resolve_forecasts"
   python -u tools/resolve_forecasts.py || echo "[skopos-scheduler] resolve_forecasts FAILED ($?)"
 
+  # The estate itself. Inert unless SKOPOS_SCAN_INVENTORY names something, and
+  # it says so rather than exiting quietly — a scheduler with no inventory is a
+  # misconfiguration, not an estate with nothing in it.
+  echo "[skopos-scheduler] $(date -u +%Y-%m-%dT%H:%M:%SZ) scheduled_scan"
+  python -u tools/scheduled_scan.py || echo "[skopos-scheduler] scheduled_scan FAILED ($?)"
+
   # RUN ONCE AND EXIT when the interval is 0 or "once". Kubernetes has its own
   # scheduler, so the Helm chart runs this as a CronJob and a container that
   # looped forever would never complete the Job — the CronJob would then refuse

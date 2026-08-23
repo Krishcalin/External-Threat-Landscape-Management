@@ -146,16 +146,26 @@ def test_a_band_change_does_not_deliver_by_default(monkeypatch):
 
 
 # ── the scan route ──────────────────────────────────────────────────────────
-def test_the_scan_route_never_takes_delivery_from_the_request():
+def test_the_scan_never_takes_delivery_from_the_request():
     """If the caller could ask for delivery, anyone who can reach the endpoint
-    could choose the moment the estate is described to a third party."""
+    could choose the moment the estate is described to a third party.
+
+    The scan moved to core/scan.py so the route and the scheduler share one
+    implementation, which makes this a STRONGER claim than before: the decision
+    is not merely absent from the route, it is unreachable from any caller.
+    """
     import inspect
 
     from api import app as api_app
-    source = inspect.getsource(api_app.run_scan)
-    assert "deliver_for_run(diff)" in source
+    from core import scan
+
+    assert "deliver_for_run(diff)" in inspect.getsource(scan.execute)
     for leak in ("deliver=", "alert=", "notify="):
-        assert leak not in source, leak
+        assert leak not in inspect.getsource(scan.execute), leak
+    # And no parameter on either surface can request it.
+    for name in inspect.signature(scan.execute).parameters:
+        assert not any(w in name for w in ("deliver", "alert", "notify")), name
+    assert "deliver_for_run" not in inspect.getsource(api_app.run_scan)
 
 
 def test_a_delivery_failure_does_not_fail_the_scan():
@@ -163,7 +173,7 @@ def test_a_delivery_failure_does_not_fail_the_scan():
     somebody about them."""
     import inspect
 
-    from api import app as api_app
-    source = inspect.getsource(api_app.run_scan)
+    from core import scan
+    source = inspect.getsource(scan.execute)
     assert "except Exception" in source
     assert "alerting failed" in source

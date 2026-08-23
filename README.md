@@ -340,7 +340,7 @@ zero results.
 
 ## 10. Project status
 
-**P0 through P6 complete.** 839 tests (776 offline, 63 against a live PostgreSQL).
+**P0 through P7 complete.** 1,081 tests (1,018 offline, 63 against a live PostgreSQL).
 
 **Shipping:** passive discovery across four data classes, DNS records with
 run-over-run change tracking, dangling-record assessment, gated active
@@ -358,8 +358,9 @@ it also found only **one of four** latency reference classes has enough resolved
 samples to forecast from, so the other three refuse. P4 found that **seven of
 eight** CERT-In reportable categories are not observable from outside an estate.
 
-**The console** has nine sections — Worklist, Operations, Executive, Crosshair,
-Suppliers, Alerts, Compliance, Accuracy, and This instance. Operations,
+**The console** has twelve sections — Worklist, Operations, Executive, Crosshair,
+Graph, Lookup, Brand, Suppliers, Alerts, Compliance, Accuracy, and This
+instance. It is behind a login with TOTP two-factor. Operations,
 Executive and Worklist are the SRS's three projections of one graph, adjacent so
 it is obvious they are the same data asked three different questions.
 

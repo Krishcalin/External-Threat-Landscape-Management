@@ -138,172 +138,30 @@ def run_scan(inventory_path: str = Query(..., description="CSV or JSON asset inv
              tech_match: float = Query(0.0, ge=0.0, le=1.0),
              actor: str = Query("api", description=
                  "who ran this; asserted, not authenticated")) -> Dict[str, Any]:
-    """Join an inventory against the exploited catalogue and score the result."""
-    corpus = _corpus()
+    """Join an inventory against the exploited catalogue and score the result.
+
+    A THIN WRAPPER ON PURPOSE. The scan itself lives in `core/scan.py` because
+    the scheduler runs the same thing, and 178 lines of alerting, ticketing and
+    forecast logic duplicated in two places is how they stop agreeing — the
+    failure this repository already hit with four stale ON CONFLICT targets and
+    an unapplied migration.
+
+    Note what this route does NOT expose: no parameter asks for alert delivery
+    or ticket filing. Both are decided inside `core/scan.py` from the
+    environment, so a caller cannot choose the moment the estate is described to
+    a third party.
+    """
+    from core import scan as _scan
     try:
-        assets, rejected = inventory.load(Path(inventory_path))
-    except FileNotFoundError as exc:
+        return _scan.execute(
+            inventory_path=inventory_path, overwatch_graph=overwatch_graph,
+            asset_tier=asset_tier, days_exposed=days_exposed,
+            sector_match=sector_match, geo_match=geo_match,
+            tech_match=tech_match, actor=actor)
+    except _scan.ScanInputError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-
-    cloud_by_id: Dict[str, Any] = {}
-    unmappable: List[Dict[str, Any]] = []
-    if overwatch_graph:
-        try:
-            cloud, unmappable = load_overwatch(Path(overwatch_graph))
-        except (OSError, ValueError) as exc:
-            raise HTTPException(status_code=400,
-                                detail=f"could not read OverWatch graph: {exc}")
-        cloud_by_id = {c.asset.identifier: c for c in cloud}
-        # Cloud resources OverWatch knows about are part of the estate even if
-        # the declared inventory never mentioned them — that IS the shadow-asset
-        # case (FR-M1-011), not a reason to ignore them.
-        known = {a.identifier for a in assets}
-        for c in cloud:
-            if c.asset.identifier not in known:
-                assets.append(c.asset)
-
-    declared = {a.identifier for a in assets if a.source != "overwatch"}
-    # Pass None unless the OPERATOR actually supplied triad values, so the
-    # engine falls back to what the catalogue can support. An all-zero
-    # AdversaryInterest is still a truthy object, so constructing one
-    # unconditionally silently defeated that fallback and left 25% of every
-    # score multiplied by zero — measured: 64 of 64 findings at adversary 0.0.
-    supplied_triad = any((sector_match, geo_match, tech_match))
-    adversary = (scoring.AdversaryInterest(sector_match=sector_match,
-                                           geo_match=geo_match,
-                                           tech_match=tech_match,
-                                           supplied=True)
-                 if supplied_triad else None)
-    catalogue = corpus.entries()
-    from core import reach
-
-    findings = []
-    for asset in assets:
-        cloud = cloud_by_id.get(asset.identifier)
-        # Outside-in reachability, where a fingerprint run supplied it. None
-        # means never probed, which is not the same as probed-and-closed and
-        # must not reconcile as one.
-        reachable, _ports = reach.from_row(asset.attributes)
-        for correspondence in match.match_asset(asset, catalogue):
-            findings.append(engine.score_exposure(
-                correspondence,
-                cloud=cloud,
-                external_reachable=reachable,
-                # THE DETERMINATION TIER. Passing this is what turns a
-                # PRODUCT_MATCH worklist entry into a VERSION_RANGE verdict —
-                # and, when a version falls outside every published range, what
-                # retires the finding entirely. It has been inert since the
-                # evaluator was written because nothing supplied ranges.
-                affected_versions=corpus.version_ranges_for(
-                    correspondence.exploited.cve),
-                ssvc=corpus.ssvc_for(correspondence.exploited.cve),
-                adversary=adversary,
-                asset_tier=asset_tier,
-                days_exposed=days_exposed,
-                shadow=asset.identifier not in declared,
-            ))
-
-    ranked = engine.rank(
-        findings,
-        automatable={e.cve: corpus.automatable(e.cve)
-                     for e in catalogue})
-    unmatched = len(match.unmatched_assets(assets, [f for f in findings]))
-    summary_payload = engine.summarise(ranked, unmatched=unmatched,
-                                       unmappable=len(unmappable))
-    catalogue_status = intel_status()
-
-    store = _findings_store()
-    run_id = store.record_run(
-        actor=actor, inventory=inventory_path, catalogue=catalogue_status,
-        assets_read=len(assets), rows_rejected=len(rejected),
-        assets_unmatched=unmatched, summary=summary_payload,
-        findings=[f.to_dict() for f in ranked])
-
-    # THE FORECAST RECORD. Every finding is a prediction, and this is the only
-    # moment its inputs exist — the corpus moves, EPSS moves, the model version
-    # changes. Writing it later is not an option: a Brier score needs RESOLVED
-    # forecasts, resolution takes calendar time, and history cannot be
-    # backfilled.
-    #
-    # This module and its schema were built and left unwired, and five scans
-    # completed before anybody noticed. Those five runs are evidence that can
-    # never be recovered, which is exactly the failure the workstream was
-    # sequenced first to avoid.
-    forecasts_written = 0
-    try:
-        from core import forecast as _forecast
-        from core.forecast_store import open_forecast_store
-        forecasts_written = open_forecast_store().record(
-            [_forecast.from_finding(f) for f in ranked], run_id=run_id)
-    except StoreUnavailable as exc:
-        # Reported, never silent. A scan that completes while the record is not
-        # accumulating looks identical to one that is, and the difference is
-        # only visible months later when there is nothing to score.
-        forecasts_written = -1
-        _log_forecast_failure = str(exc)
-
-    diff = store.diff_against_previous(run_id)
-
-    # ALERT DELIVERY. Gated on SKOPOS_ALERT_ON_SCAN, never on a request
-    # parameter: if the caller could ask for delivery, anyone who can reach
-    # this endpoint could choose the moment the estate is described to a third
-    # party. The switch lives in the environment, where it is set once by
-    # whoever runs the service.
-    #
-    # A delivery failure does not fail the scan. The findings are already
-    # persisted and correct; what failed is telling somebody about them, and
-    # discarding a valid run over that would be the worse trade.
-    from core import alerting as _alerting
-    try:
-        alerting_report = _alerting.deliver_for_run(diff)
-    except Exception as exc:                                   # noqa: BLE001
-        alerting_report = {"decided": None, "delivered": False, "channels": {},
-                           "reason": f"alerting failed: {type(exc).__name__}: {exc}"}
-
-    # ITSM. Filed from diff.new ONLY, which is where the deduplication comes
-    # from: a finding carried over from the previous run was already ticketed on
-    # the run it first appeared, and identity is (asset, cve) - the same key the
-    # diff uses. That needs no ticket-tracking table and cannot drift out of
-    # step with the diff, because it IS the diff.
-    from core import itsm as _itsm
-    try:
-        itsm_report = _itsm.file_for_run(diff.new)
-    except Exception as exc:                                   # noqa: BLE001
-        itsm_report = {"decided": None, "filed": False,
-                       "reason": f"ticketing failed: {type(exc).__name__}: {exc}"}
-    # The bodies are not echoed into the scan response: they are long, and a
-    # scan result is not where somebody reads a ticket.
-    itsm_report.pop("tickets", None)
-
-    return {
-        "run": run_id,
-        "scanned_at": date.today().isoformat(),
-        "catalogue": catalogue_status,
-        "assets_read": len(assets),
-        "rows_rejected": len(rejected),
-        "summary": summary_payload,
-        "unmappable_cloud_resources": unmappable,
-        # Surfaced on every scan. If this is ever 0 or -1 the accuracy record is
-        # not accumulating, and that must be visible now rather than discovered
-        # when somebody asks for a Brier score.
-        "forecasts_recorded": forecasts_written,
-        # What is NEW since last time is most of why a monitoring product is
-        # worth running continuously rather than once. It was not merely
-        # unbuilt before persistence — it was impossible.
-        # Always present, always says which of the four states this run was in
-        # — including "delivery is on and no channel is configured", which from
-        # the outside is indistinguishable from a quiet run.
-        "alerting": alerting_report,
-        "ticketing": itsm_report,
-        "since_last_run": {
-            "previous_run": diff.previous_run,
-            "headline": diff.headline(),
-            "new": len(diff.new),
-            "resolved": len(diff.resolved),
-            "changed_band": len(diff.reband),
-            "carried": diff.carried,
-        },
-    }
+    except _scan.ScanUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 @app.get("/api/v1/summary", tags=["findings"])
@@ -1435,16 +1293,104 @@ def exposure_graph(limit: int = Query(300, ge=1, le=500),
     # are a different type, not a flag on a finding — see core/coverage.py. The
     # graph reports the count and refuses to draw them as exposures.
     payload["beyond_catalogue"] = {
-        "advisories": 0,
+        "advisories": None,
+        "route": "/api/v1/advisories",
         "note": (
             "Vulnerabilities beyond the exploited catalogue are held in a "
             "different type on purpose (core/coverage.py): OSV and EUVD carry "
             "hundreds of thousands of advisories with no exploitation filter, "
             "and blending them into this graph would turn a short defensible "
             "worklist into a vulnerability scanner, quietly and in one merge. "
-            "No advisory source is configured, so none were fetched."),
+            "They are served from /api/v1/advisories, which needs an "
+            "inventory carrying package coordinates."),
     }
     return payload
+
+
+@app.get("/api/v1/advisories", tags=["graph"])
+def advisories(inventory_path: str = Query(..., description=
+                   "the inventory to look up; the same CSV a scan reads"),
+               actor: str = Query("api")) -> Dict[str, Any]:
+    """Vulnerabilities BEYOND the exploited catalogue, served separately.
+
+    A different route because they are a different type. OSV and EUVD carry
+    hundreds of thousands of advisories with no exploitation filter, and putting
+    them in the same list as the exploited worklist would turn this product into
+    the thing it was written not to be — quietly, and in a single merge.
+    `core/coverage.py` makes that impossible rather than merely unwise:
+    `engine.rank()` will not accept an advisory.
+
+    WHY THIS USUALLY RETURNS NOTHING, AND WHY THAT IS THE POINT. OSV joins on an
+    ECOSYSTEM AND AN EXACT PACKAGE NAME, which come from an SBOM or a dependency
+    manifest. A discovered, fingerprinted host carries neither — measured on the
+    sample inventory: 0 of 9 rows have package coordinates. So the normal answer
+    is "nothing could be looked up", and the response says which assets and why
+    rather than returning an empty list that reads as a clean estate.
+    """
+    from collect import advisories as _advisories
+    from core import coverage as _coverage
+    from core import inventory as _inventory
+
+    try:
+        assets, rejected = inventory.load(Path(inventory_path))
+    except Exception as exc:                                    # noqa: BLE001
+        raise HTTPException(status_code=422, detail={
+            "error": f"{type(exc).__name__}: {exc}",
+            "note": "this route reads the same inventory a scan does"})
+
+    # The stored scope, exactly as a discovery run uses it. An advisory lookup
+    # reaches a public vulnerability database and never the customer's estate,
+    # but it still takes a permit per asset like everything else.
+    from core.store import PostgresStore
+    try:
+        scope = PostgresStore().load_scope()
+    except StoreUnavailable:
+        # No database, no scope rules — so every asset is UNSCOPED and the
+        # collector refuses each one by name. That is a real answer and reads
+        # correctly in `failures`; an empty Scope() silently permitting nothing
+        # would look the same but mean something else.
+        scope = Scope([])
+    try:
+        # Returns (CoverageResult, Coverage) — the second is the
+        # per-source degradation report every collector produces.
+        result, coverage = _advisories.run(assets, actor=actor,
+                                           scope=scope)
+    except Exception as exc:                                    # noqa: BLE001
+        raise HTTPException(status_code=502, detail={
+            "error": f"{type(exc).__name__}: {exc}",
+            "why": "no partial advisory set is returned as fact"})
+
+    return {
+        "note": result.note(total_assets=len(assets)),
+        "advisories": [a.to_dict() if hasattr(a, "to_dict") else {
+            "asset": a.asset, "identifier": a.identifier,
+            "source": getattr(a.source, "value", str(a.source)),
+            "summary": a.summary, "published": str(a.published or ""),
+        } for a in result.advisories],
+        "assets_read": len(assets),
+        "assets_covered": result.assets_covered,
+        # NAMED, not counted. This is the majority case for a discovered estate
+        # and a reader needs to know it is a coverage gap, not a clean result.
+        "without_coordinates": list(result.without_coordinates),
+        "failures": [{"asset": a, "why": w} for a, w in result.failures],
+        "rows_rejected": len(rejected),
+        # Whether the SOURCE answered, separate from whether anything was
+        # found. A failed OSV lookup and an empty one are different results.
+        "source_coverage": coverage.note(len(result.advisories), "advisory")
+        if hasattr(coverage, "note") else None,
+        "kept_separate": (
+            "These are NOT exposures and are not scored, ranked or merged into "
+            "the worklist. None of them is a statement that anyone is "
+            "exploiting anything — that is what the exploited catalogue is for, "
+            "and it is a separate list on purpose."),
+        "how_to_get_coverage": (
+            "OSV needs an ecosystem and an exact package name. Add `package` "
+            "and `ecosystem` columns to the inventory, from an SBOM or a "
+            "dependency manifest. A product name is deliberately NOT used as a "
+            "package name: measured, it returns nothing, and guessing a mapping "
+            "from \"Apache HTTP Server\" to a package would be inventing a "
+            "fact about your estate."),
+    }
 
 
 @app.get("/api/v1/compliance/controls", tags=["compliance"])

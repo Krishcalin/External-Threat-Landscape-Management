@@ -32,14 +32,21 @@ def test_an_unrecognised_switch_value_means_off(value, monkeypatch):
     assert itsm.enabled() is False
 
 
-def test_no_route_can_trigger_ticketing():
+def test_no_caller_can_trigger_ticketing():
+    """Now enforced in core/scan.py, which both the route and the scheduler
+    call — so this is stronger than it was: no caller can reach the decision,
+    not merely no route."""
     import inspect
 
     from api import app as api_app
-    source = inspect.getsource(api_app.run_scan)
-    assert "file_for_run(diff.new)" in source
+    from core import scan
+
+    assert "file_for_run(diff.new)" in inspect.getsource(scan.execute)
     for leak in ("ticket=", "file_tickets=", "itsm="):
-        assert leak not in source, leak
+        assert leak not in inspect.getsource(scan.execute), leak
+    for name in inspect.signature(scan.execute).parameters:
+        assert "ticket" not in name and "itsm" not in name, name
+    assert "file_for_run" not in inspect.getsource(api_app.run_scan)
 
 
 # ── a ticket must not read as a determination ───────────────────────────────

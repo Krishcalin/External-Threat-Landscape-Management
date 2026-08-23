@@ -132,6 +132,16 @@ services:
       # Override to run more often when verifying the wiring. The default is a
       # day because that is the publication cadence of the data.
       SKOPOS_SCHEDULE_SECONDS: ${SKOPOS_SCHEDULE_SECONDS:-86400}
+      # The estate to re-scan unattended. UNSET MEANS NO SCAN — the scheduler
+      # keeps the forecast record alive either way, but run-over-run diff,
+      # alerting and ticketing only fire when something re-scans.
+      #
+      # Delivery is NOT switched on by this. Running a scan describes your
+      # estate to yourself; alerting and ticketing describe it to somebody else
+      # and keep their own consent (SKOPOS_ALERT_ON_SCAN, SKOPOS_ITSM_ON_SCAN).
+      SKOPOS_SCAN_INVENTORY: ${SKOPOS_SCAN_INVENTORY:-}
+      SKOPOS_SCAN_OVERWATCH_GRAPH: ${SKOPOS_SCAN_OVERWATCH_GRAPH:-}
+      SKOPOS_SCAN_ACTOR: ${SKOPOS_SCAN_ACTOR:-scheduled-scan}
     entrypoint: ["/bin/sh", "tools/daily.sh"]
     # The image's healthcheck probes the HTTP API, which this service does not
     # serve — inherited unchanged it marks the scheduler permanently unhealthy,
