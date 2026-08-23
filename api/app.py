@@ -518,6 +518,36 @@ def crosshair(limit: int = Query(200, ge=1, le=500)) -> Dict[str, Any]:
     return payload
 
 
+@app.get("/api/v1/compliance/controls", tags=["compliance"])
+def compliance_controls(framework: Optional[str] = None) -> Dict[str, Any]:
+    """Which controls this product helps evidence, and what it does not do.
+
+    There is deliberately no coverage figure. A percentage would be summed,
+    shown to a board, and the board would be receiving a number no tool has the
+    basis to produce.
+    """
+    from core import controls as _controls
+    payload = _controls.mapping()
+    if framework:
+        payload["controls"] = [c.to_dict()
+                               for c in _controls.by_framework(framework)]
+    return payload
+
+
+@app.get("/api/v1/compliance/cert-in", tags=["compliance"])
+def compliance_cert_in() -> Dict[str, Any]:
+    """What SKOPOS can and cannot observe against CERT-In's reportable list.
+
+    The honest answer is: almost none of it. Seven of the eight Annexure I
+    categories describe something an adversary DID, and this product looks at
+    your estate from outside rather than monitoring your systems. The six-hour
+    clock is not started from a finding and there is no endpoint that does so —
+    see `why_not_automatic`.
+    """
+    from core import cert_in as _cert_in
+    return _cert_in.observability_note()
+
+
 # ---------------------------------------------------------------------------
 # The console.
 #
