@@ -60,11 +60,13 @@ class Corpus:
 
     def __init__(self, kev: Dict[str, Any], epss: Dict[str, Any],
                  affected: Optional[Dict[str, Any]] = None,
-                 ssvc: Optional[Dict[str, Any]] = None) -> None:
+                 ssvc: Optional[Dict[str, Any]] = None,
+                 artefacts: Optional[Dict[str, Any]] = None) -> None:
         self._kev = kev
         self._epss = epss
         self._affected = affected or {}
         self._ssvc = ssvc or {}
+        self._artefacts = artefacts or {}
         self._entries: Optional[List[Exploited]] = None
 
     # ── provenance ──────────────────────────────────────────────────────────
@@ -157,6 +159,36 @@ class Corpus:
     def has_ssvc(self) -> bool:
         return bool(self._ssvc.get("ssvc"))
 
+    # ── published exploit code ──────────────────────────────────────────────
+    @property
+    def has_artefacts(self) -> bool:
+        return bool(self._artefacts.get("artefacts"))
+
+    @property
+    def artefacts_retrieved(self) -> Optional[date]:
+        return _parse_date(self._artefacts.get("_meta", {}).get("retrieved_at"))
+
+    @property
+    def artefact_coverage(self) -> Optional[float]:
+        """The share of the catalogue with published code, as a fraction.
+
+        Reported for the same reason `determinable_share` is: roughly half the
+        catalogue has no artefact, and a latency distribution drawn from the
+        half that does must not be read as covering the whole.
+        """
+        covered = self._artefacts.get("_meta", {}).get("covered")
+        total = len(self.entries())
+        if not covered or not total:
+            return None
+        return round(float(covered) / total, 4)
+
+    def artefacts_for(self, cve: str) -> List[Dict[str, Any]]:
+        """Published artefacts for one CVE. Empty means NONE PUBLISHED THAT WE
+        INDEX, which is not the same as none existing — private and unindexed
+        exploit code is the normal case, not the exception."""
+        records = self._artefacts.get("artefacts") or {}
+        return list(records.get(str(cve).strip().upper()) or [])
+
     # ── content ─────────────────────────────────────────────────────────────
     def entries(self) -> List[Exploited]:
         if self._entries is None:
@@ -229,4 +261,12 @@ def load(data_dir: Optional[str] = None) -> Corpus:
     ssvc_path = base / "ssvc.json"
     if ssvc_path.exists():
         ssvc = json.loads(ssvc_path.read_text(encoding="utf-8"))
-    return Corpus(kev, epss, affected, ssvc)
+
+    # Artefacts are optional for the same reason again, and their absence costs
+    # exactly one thing: the weaponisation-latency base rate has no input, so
+    # `core/latency.py` reports that it cannot answer rather than guessing.
+    artefacts: Dict[str, Any] = {}
+    artefacts_path = base / "artefacts.json"
+    if artefacts_path.exists():
+        artefacts = json.loads(artefacts_path.read_text(encoding="utf-8"))
+    return Corpus(kev, epss, affected, ssvc, artefacts)

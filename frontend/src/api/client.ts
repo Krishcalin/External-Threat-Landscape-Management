@@ -1,5 +1,5 @@
 import type { CrosshairView, DnsRunsPage, FindingsPage, IntelStatus,
-              Summary } from './types'
+              LatencyReport, Summary } from './types'
 
 /** Relative paths only: the built bundle carries no origin, so it can be served
  *  by the API itself in a deployment and proxied in development. */
@@ -44,3 +44,11 @@ export const takeoverMeaning = () => get<Record<string, string>>('/takeover/mean
  *  read it; it is not, until there is a session to carry the token. */
 
 export const crosshair = () => get<CrosshairView>('/crosshair?limit=200')
+
+/** The class table, fetched once — not one request per row.
+ *
+ *  There is deliberately no `latencyFor(cve)` here. A per-row number on the
+ *  findings table would be read as a countdown for that asset, and the module
+ *  behind it measures a population, not an estate. The per-CVE route exists for
+ *  an operator asking about one CVE on purpose. */
+export const latency = () => get<LatencyReport>('/latency')

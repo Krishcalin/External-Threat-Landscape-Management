@@ -1,4 +1,4 @@
-import type { CrosshairView, AimedEntry } from '../api/types'
+import type { CrosshairView, AimedEntry, LatencyReport } from '../api/types'
 
 /**
  * Convergence — what is being fired at the internet that you stand in front of.
@@ -25,7 +25,10 @@ const TIER_TONE: Record<string, string> = {
   present: 'banner',
 }
 
-export function CrosshairPanel({ view }: { view: CrosshairView | null }) {
+export function CrosshairPanel({ view, latency }: {
+  view: CrosshairView | null
+  latency: LatencyReport | null
+}) {
   if (!view) {
     return (
       <section className="panel">
@@ -77,6 +80,8 @@ export function CrosshairPanel({ view }: { view: CrosshairView | null }) {
         </p>
       )}
 
+      <BaseRate report={latency} />
+
       <Tier title="Converged" tone={TIER_TONE.converged} entries={converged}
             note="Several independent signals agree. This is where to start." />
       <Tier title="Elevated" tone={TIER_TONE.elevated} entries={elevated}
@@ -84,6 +89,58 @@ export function CrosshairPanel({ view }: { view: CrosshairView | null }) {
     </section>
   )
 }
+
+
+/**
+ * The one reference class that can answer, and the three that cannot.
+ *
+ * RENDERED AT PANEL LEVEL, NOT PER ROW. The median is the middle of a
+ * population of past vulnerabilities; putting it in a table cell would read as
+ * "this asset has 8 days left", which is a forecast about one estate and is not
+ * what was measured. The refusing classes are shown alongside because a screen
+ * that displayed only the class with a number would imply the product has a
+ * general answer to "how long do I have". It has one answer out of four.
+ */
+function BaseRate({ report }: { report: LatencyReport | null }) {
+  if (!report) return null
+  const classes = Object.values(report.classes)
+  const usable = classes.filter((c) => c.usable)
+  const refused = classes.length - usable.length
+
+  return (
+    <div className="banner banner-info">
+      <strong>How long comparable vulnerabilities took.</strong>{' '}
+      {usable.length === 0 ? (
+        <>
+          No reference class here has data narrow enough to say anything at all.
+          Nothing is estimated.
+        </>
+      ) : (
+        <>
+          {usable.map((c) => (
+            <span key={c.reference_class}>
+              For <em>{c.reference_class}</em>, exploitation followed public
+              code by a median of <strong>{c.median} days</strong> across{' '}
+              {c.samples} past vulnerabilities (middle half {c.p25}&ndash;
+              {c.p75}).
+            </span>
+          ))}
+        </>
+      )}
+      {refused > 0 && (
+        <>
+          {' '}
+          The other {refused} of {report.total_classes} reference classes span
+          years, so no estimate is offered for them.
+        </>
+      )}
+      <p className="muted" style={{ marginTop: 6 }}>
+        {report.not_a_forecast}
+      </p>
+    </div>
+  )
+}
+
 
 function Tier({ title, tone, entries, note }: {
   title: string

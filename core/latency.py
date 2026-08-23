@@ -63,6 +63,12 @@ MIN_SAMPLE = 20
 #: having no statement at all.
 MAX_USEFUL_SPREAD_DAYS = 400
 
+#: Mirrors `core/artefacts.py:DEFAULT_LATENCY_SINCE`. Duplicated rather than
+#: imported to keep this module free of dependencies it does not otherwise
+#: need; a test asserts the two stay equal, because a silent divergence would
+#: mean two different windows described by one number.
+DEFAULT_SINCE = date(2023, 1, 1)
+
 
 @dataclass(frozen=True)
 class ReferenceClass:
@@ -172,5 +178,98 @@ NOT_A_FORECAST = (
     "in it. Where the data cannot support a statement, none is made."
 )
 
-__all__ = ["ReferenceClass", "Latency", "build", "lookup", "MIN_SAMPLE",
+def observations_from(corpus, since: Optional[date] = None
+                      ) -> Tuple[List[Tuple[bool, bool, int]], Dict[str, int]]:
+    """`(ransomware, weaponised, days)` per catalogue entry, plus what was lost.
+
+    Takes anything exposing `entries()` and `artefacts_for()` rather than
+    importing the corpus module: this file does no I/O and has no business
+    knowing where the data came from, and a duck-typed argument keeps it
+    testable without a 200 KB fixture.
+
+    The second return value is the ATTRITION, and it is not decoration. Roughly
+    half the catalogue has no published artefact and a further slice carries no
+    usable date, so a distribution built here covers a minority of the corpus.
+    Reporting the count that fell out is the difference between a base rate and
+    a base rate presented as if it covered everything.
+    """
+    from core.artefacts import Artefact, ArtefactKind, ArtefactSet
+
+    cutoff = since if since is not None else DEFAULT_SINCE
+    observations: List[Tuple[bool, bool, int]] = []
+    lost = {"no_artefact": 0, "no_usable_date": 0, "outside_window": 0}
+
+    for entry in corpus.entries():
+        records = corpus.artefacts_for(entry.cve)
+        if not records:
+            lost["no_artefact"] += 1
+            continue
+        if cutoff is not None and entry.date_added and entry.date_added < cutoff:
+            lost["outside_window"] += 1
+            continue
+
+        artefacts = []
+        for record in records:
+            try:
+                kind = ArtefactKind(str(record.get("kind")))
+            except ValueError:
+                continue
+            artefacts.append(Artefact(
+                kind=kind, cve=entry.cve,
+                published=_as_date(record.get("published")),
+                reference=str(record.get("reference") or "")))
+        if not artefacts:
+            lost["no_artefact"] += 1
+            continue
+
+        artefact_set = ArtefactSet(cve=entry.cve, artefacts=artefacts)
+        days = artefact_set.latency_days(entry.date_added)
+        if days is None:
+            lost["no_usable_date"] += 1
+            continue
+        observations.append((bool(entry.known_ransomware),
+                             artefact_set.weaponised, days))
+    return observations, lost
+
+
+def _as_date(value) -> Optional[date]:
+    text = str(value or "").strip()[:10]
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def report(corpus, since: Optional[date] = None) -> Dict[str, object]:
+    """Every reference class, with its attrition and its caveat attached.
+
+    Returns all four classes including the unusable ones. Hiding a class that
+    cannot answer would leave a caller believing the two it can see are the
+    whole picture, when the honest headline is that three of four cannot
+    support a statement.
+    """
+    observations, lost = observations_from(corpus, since)
+    classes = build(observations)
+    for reference in (ReferenceClass(r, w)
+                      for r in (True, False) for w in (True, False)):
+        classes.setdefault(reference.label, Latency(reference, 0))
+    usable = [c for c in classes.values() if c.usable]
+    return {
+        "classes": {label: value.to_dict()
+                    for label, value in sorted(classes.items())},
+        "usable_classes": len(usable),
+        "total_classes": len(classes),
+        "observations": len(observations),
+        "excluded": lost,
+        "window_since": str(since if since is not None else DEFAULT_SINCE),
+        "not_a_forecast": NOT_A_FORECAST,
+        "thresholds": {"min_sample": MIN_SAMPLE,
+                       "max_useful_spread_days": MAX_USEFUL_SPREAD_DAYS},
+    }
+
+
+__all__ = ["ReferenceClass", "Latency", "build", "lookup", "report",
+           "observations_from", "DEFAULT_SINCE", "MIN_SAMPLE",
            "MAX_USEFUL_SPREAD_DAYS", "NOT_A_FORECAST"]

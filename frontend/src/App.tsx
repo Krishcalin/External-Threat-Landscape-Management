@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { ApiError, crosshair as fetchCrosshair,
+import { ApiError, crosshair as fetchCrosshair, latency as fetchLatency,
          dnsRuns as fetchDnsRuns, findings as fetchFindings,
          intel as fetchIntel, reconciliationGuide,
          summary as fetchSummary } from './api/client'
-import type { CrosshairView, DnsRun, Finding, IntelStatus,
+import type { CrosshairView, DnsRun, Finding, IntelStatus, LatencyReport,
               ReconciliationOutcome,
               Summary } from './api/types'
 import { CoveragePanel } from './components/CoveragePanel'
@@ -153,6 +153,7 @@ export function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [dnsRun, setDnsRun] = useState<DnsRun | null>(null)
   const [crosshair, setCrosshair] = useState<CrosshairView | null>(null)
+  const [latency, setLatency] = useState<LatencyReport | null>(null)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -173,6 +174,9 @@ export function App() {
     // Absent is a state, not an error: no scan on record is not an estate with
     // nothing in the crosshair.
     fetchCrosshair().then(setCrosshair).catch(() => setCrosshair(null))
+    // 503 when no artefact index is vendored. The base rate simply does not
+    // render then — an absent measurement must not become a blank number.
+    fetchLatency().then(setLatency).catch(() => setLatency(null))
   }, [])
 
   const unexplained = summary?.reconciliation?.unexplained_exposure ?? 0
@@ -214,7 +218,7 @@ export function App() {
       <main className="main stack">
         {error && <div className="banner banner-crit" role="alert">{error}</div>}
 
-        <CrosshairPanel view={crosshair} />
+        <CrosshairPanel view={crosshair} latency={latency} />
 
         <CoveragePanel run={dnsRun} />
 

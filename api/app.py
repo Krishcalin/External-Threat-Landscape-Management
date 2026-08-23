@@ -519,6 +519,166 @@ def crosshair(limit: int = Query(200, ge=1, le=500)) -> Dict[str, Any]:
     return payload
 
 
+# ---------------------------------------------------------------------------
+# Weaponisation latency. A base rate over what happened to others, and mostly
+# a refusal: three of the four reference classes cannot support a statement.
+
+
+@app.get("/api/v1/latency", tags=["latency"])
+def latency_classes() -> Dict[str, Any]:
+    """Every reference class, including the ones that cannot answer.
+
+    All four are returned on purpose. Serving only the usable class would leave
+    a caller believing the product has a general answer to "how long do I have",
+    when the honest headline is that it has one answer out of four and the other
+    three span years.
+    """
+    from core import latency as _latency
+    try:
+        corpus = intel.load()
+    except intel.IntelUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    if not corpus.has_artefacts:
+        raise HTTPException(status_code=503, detail={
+            "error": "no artefact index is vendored",
+            "fix": "python tools/refresh_intel.py --only-artefacts",
+            "why": ("weaponisation latency is measured from published exploit "
+                    "code to catalogue addition. With no artefact index there "
+                    "is no measurement, and a base rate is not guessed.")})
+    payload = _latency.report(corpus)
+    payload["artefact_coverage"] = corpus.artefact_coverage
+    payload["coverage_meaning"] = (
+        f"{corpus.artefact_coverage:.1%} of the catalogue has published code we "
+        f"index. The rest is not evidence that no exploit exists — private and "
+        f"unindexed code is the normal case."
+        if corpus.artefact_coverage else None)
+    return payload
+
+
+@app.get("/api/v1/latency/{cve}", tags=["latency"])
+def latency_for(cve: str) -> Dict[str, Any]:
+    """The reference class this CVE falls into, and what it does or cannot say.
+
+    The class is chosen from facts about the CVE — ransomware linkage from the
+    catalogue, weaponisation from whether a packaged module exists — never from
+    anything observed on the customer's asset. The same CVE gets the same answer
+    for everybody, which is what makes it a base rate rather than a score.
+    """
+    from core import latency as _latency
+    try:
+        corpus = intel.load()
+    except intel.IntelUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    wanted = str(cve).strip().upper()
+    entry = next((e for e in corpus.entries() if e.cve.upper() == wanted), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail={
+            "error": f"{wanted} is not in the vendored catalogue",
+            "why": ("this base rate is measured over known-exploited "
+                    "vulnerabilities. A CVE outside that set has no comparable "
+                    "population here, and one would not be invented for it.")})
+
+    records = corpus.artefacts_for(wanted)
+    from core.artefacts import Artefact, ArtefactKind, ArtefactSet
+    artefacts = []
+    for record in records:
+        try:
+            kind = ArtefactKind(str(record.get("kind")))
+        except ValueError:
+            continue
+        artefacts.append(Artefact(kind=kind, cve=wanted,
+                                  published=_latency._as_date(record.get("published")),
+                                  reference=str(record.get("reference") or "")))
+    artefact_set = ArtefactSet(cve=wanted, artefacts=artefacts)
+
+    observations, _ = _latency.observations_from(corpus)
+    classes = _latency.build(observations)
+    answer = _latency.lookup(classes, entry.known_ransomware,
+                             artefact_set.weaponised)
+    return {
+        "cve": wanted,
+        "known_ransomware": entry.known_ransomware,
+        "weaponised": artefact_set.weaponised,
+        "artefacts": artefact_set.evidence(),
+        "reference_class": answer.to_dict(),
+        "answer": answer.explain(),
+        "not_a_forecast": _latency.NOT_A_FORECAST,
+    }
+
+
+# ---------------------------------------------------------------------------
+# STIX 2.1 export.
+
+
+@app.get("/api/v1/export/stix", tags=["export"])
+def export_stix(limit: int = Query(500, ge=1, le=2000),
+                run: Optional[int] = None) -> Dict[str, Any]:
+    """Findings as a STIX 2.1 bundle, with the worklist distinction preserved.
+
+    STIX has no vocabulary for "this product matches but the version was never
+    compared", and the obvious encoding — a `Relationship` of type `has` — reads
+    downstream as a determination. So confidence is set explicitly (worklist 40,
+    determination 90) and a `note` object carrying the caveat travels inside the
+    bundle. A caveat that stays behind in the console is not a caveat.
+    """
+    from core import stix as _stix
+    rows = _findings_store().findings(run_id=run, limit=limit)
+    bundle = _stix.bundle(rows)
+    return {
+        "bundle": bundle,
+        "objects": len(bundle.get("objects", [])),
+        "findings_exported": len(rows),
+        "limit": limit,
+        "truncated": len(rows) >= limit,
+        "caveat": _stix.BUNDLE_CAVEAT,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Alerting. This route DECIDES; it does not deliver.
+
+
+@app.get("/api/v1/alerts", tags=["alerts"])
+def alerts(run: Optional[int] = None,
+           minimum_band: Optional[str] = None) -> Dict[str, Any]:
+    """What would be worth interrupting somebody for, computed and not sent.
+
+    Deliberately read-only. `core/alerting.py` can dispatch to a webhook or an
+    SMTP server, and that path stays configuration-driven rather than reachable
+    from HTTP: a GET that caused the server to POST your findings outward would
+    let anyone who can reach this API choose the moment your estate is
+    described to a third party. Delivery is an operator decision, made once, in
+    the environment — not a query parameter.
+
+    The suppressed counts are returned with the alerts, because an operator who
+    sees five needs to know whether five was everything or a cap.
+    """
+    from core import alerting as _alerting
+    diff = _findings_store().diff_against_previous(run)
+    policy = (_alerting.Policy(minimum_band=minimum_band)
+              if minimum_band else _alerting.Policy())
+    decided = _alerting.build(diff, policy=policy)
+    return {
+        "previous_run": diff.previous_run,
+        "is_baseline": diff.is_baseline,
+        "alerts": [a.as_dict() for a in decided["alerts"]],
+        "suppressed_below_band": decided["suppressed_below_band"],
+        "suppressed_by_cap": decided["suppressed_by_cap"],
+        "minimum_band": decided["minimum_band"],
+        "note": decided["note"],
+        "delivered": False,
+        "delivery": (
+            "This endpoint computed the decision and sent nothing. Configure "
+            "SKOPOS_ALERT_WEBHOOK or SKOPOS_ALERT_EMAIL to have a scan deliver "
+            "them; until then alerts are computed and not delivered, which is "
+            "reported rather than left to be discovered."),
+        "triggers_off_by_default": [
+            t.value for t in _alerting.Trigger
+            if t not in _alerting.DEFAULT_TRIGGERS],
+    }
+
+
 @app.get("/api/v1/compliance/controls", tags=["compliance"])
 def compliance_controls(framework: Optional[str] = None) -> Dict[str, Any]:
     """Which controls this product helps evidence, and what it does not do.

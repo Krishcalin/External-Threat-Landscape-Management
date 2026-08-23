@@ -1,0 +1,11 @@
+# Files that are executed by a Linux container must keep LF endings, whatever
+# the checkout platform does. With core.autocrlf=true a Windows clone rewrites
+# them to CRLF, Docker copies the working tree into the image, and /bin/sh fails
+# on the trailing \r with an error that names a line rather than the cause.
+*.sh text eol=lf
+Dockerfile text eol=lf
+
+# The vendored corpus is compared byte-for-byte between runs and its provenance
+# is recorded per scan; line-ending rewriting would make identical fetches look
+# like changes.
+data/*.json text eol=lf

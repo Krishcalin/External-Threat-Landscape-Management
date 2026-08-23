@@ -331,7 +331,7 @@ zero results.
 
 ## 10. Project status
 
-**P0 through P4 complete.** 662 tests (632 offline, 30 against a live PostgreSQL).
+**P0 through P4 complete.** 680 tests (650 offline, 30 against a live PostgreSQL).
 
 **Shipping:** passive discovery across four data classes, DNS records with
 run-over-run change tracking, dangling-record assessment, gated active
@@ -349,7 +349,20 @@ it also found only **one of four** latency reference classes has enough resolved
 samples to forecast from, so the other three refuse. P4 found that **seven of
 eight** CERT-In reportable categories are not observable from outside an estate.
 
-**Next:** alerting and the TAXII server, then tenancy.
+**Next:** a TAXII server, alert delivery from a scan run, then tenancy.
+
+**Optional, off by default.** A `scheduler` profile runs the two jobs whose
+missed days cannot be refilled — an EPSS snapshot and forecast resolution:
+
+```bash
+docker compose --profile scheduler up -d
+```
+
+It is opt-in because it makes outbound requests every day without further
+prompting, and a stack that started doing that on `docker compose up` would be
+making an egress decision for you. Leaving it off has a cost too: EPSS never
+republishes a past day, so each day it does not run is a hole no later effort
+fills.
 
 **Not shipping, deliberately:** closed-forum collection, active takeover
 corroboration, version determinations from banners, multi-tenancy, and any

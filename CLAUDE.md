@@ -225,7 +225,7 @@ skopos/
 │   ├── takeover.py           verdicts, mandatory evidence, the ceiling
 │   └── takeover_rules.py     provider catalogue + review dates
 ├── collect/
-│   ├── egress.py             THE ONLY module that performs I/O
+│   ├── egress.py             the door discovery and probing go through
 │   ├── report.py             one degradation vocabulary for every subsystem
 │   ├── registry.py           sources, their terms, their defaults
 │   ├── discovery.py          merge, scope binding, date provenance
@@ -242,7 +242,7 @@ skopos/
 ├── db/                       001 schema · 002 DNS · 003 findings
 ├── data/                     kev.json, epss.json — VERSIONED INPUTS
 ├── docs/P1-BUILD-SPEC.md     the adversarial design pass, and its 86 problems
-└── tests/                    414 tests
+└── tests/                    680 tests
 ```
 
 ---
@@ -271,8 +271,8 @@ skopos/
 
 ## Status
 
-**P0 through P4 complete. 662 tests** (632 offline + 30 against a live
-PostgreSQL).
+**P0 through P4 complete, and every module now has a surface. 680 tests**
+(650 offline + 30 against a live PostgreSQL).
 
 **TEPS golden-tested against SRS §9.1** — the published worked example reproduces
 exactly at 78, every intermediate factor matching (E=0.817, X=1.000, A=0.850,
@@ -301,7 +301,10 @@ number is in the product, not just in this file.
 
 ### Next
 
-- [ ] Alerting, STIX 2.1 export, TAXII server
+- [ ] TAXII server (the STIX bundle now has a route; serving it over TAXII does
+      not)
+- [ ] Alert DELIVERY from a scan run — the decision has a route, dispatch is
+      still configuration-only and unreachable from HTTP by design
 - [ ] `Method.PARENT_ZONE`, which would unlock active takeover corroboration —
       specified in `docs/P1-BUILD-SPEC.md` §11, deferred by sponsor decision
 - [ ] Tenancy (FR-M0-001): org_id on every table, RLS, Postgres roles per org
@@ -478,7 +481,41 @@ from the store, never taken from the request, so a caller cannot post
 confirmed vulnerable version. The route stores nothing and transmits nothing;
 filing is an act by the organisation, through CERT-In's own channel.
 
-**662 tests** (632 offline + 30 live-database).
+**D29 - a module without a surface is not shipped.** An audit for modules
+imported by nothing outside their own tests found four: `stix.py`, `alerting.py`,
+`latency.py` and `artefacts.py` — 956 lines, 60 tests, all passing, none
+reachable by a user. `latency.py` was worse than unwired: `data/artefacts.json`
+had never been vendored, so its INPUT did not exist in the repo either and the
+P3 measurement lived only in a transcript. Fixed by vendoring the artefact index
+(834 of 1,674 KEV entries, 49.8%), adding `--only-artefacts` to the refresher so
+the other four corpora stay byte-identical, and giving all four modules routes.
+The measurement reproduces exactly: ransomware-linked + packaged module, n=58,
+median 8 days, IQR 1-124; the other three classes span 1,525 / 1,703 / 2,405
+days and refuse. `test_surfaces.py` covers the routes.
+
+**D30 - the alert route decides and does not deliver.** `alerting.dispatch` can
+post to a webhook or an SMTP server, and it stays configuration-driven. A GET
+that caused the server to send findings outward would let anyone who can reach
+the API choose the moment the estate is described to a third party, so
+`/api/v1/alerts` returns the decision with `delivered: false` and a test asserts
+no route references `dispatch`, `send_webhook` or `send_email`. Related
+correction: this file and ARCHITECTURE.md both claimed `egress.py` was the ONLY
+module performing I/O. It never was — `collect/ct.py` and `core/alerting.py`
+also do, each under its own `# NETWORK-BOUNDARY:` marker, which is the rule the
+test actually enforces.
+
+**D31 - the daily jobs are opt-in, and the cost of that is stated.** EPSS
+publishes today's scores and never republishes yesterday's, so a missed day is a
+permanent hole in every velocity figure computed afterwards. That argues for a
+scheduler running by default, and the gate argues louder against it: a stack
+that began phoning out because somebody ran `docker compose up` would be making
+an egress decision on the operator's behalf. So the `scheduler` compose profile
+is off unless started explicitly, and both the compose comment and `.env.example`
+say what leaving it off costs. It runs immediately on start rather than sleeping
+first, because a scheduler that waits a day before its first run is
+indistinguishable from one that is broken.
+
+**680 tests** (650 offline + 30 live-database).
 
 ---
 

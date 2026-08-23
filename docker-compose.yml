@@ -51,5 +51,33 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ── opt-in ────────────────────────────────────────────────────────────────
+  # Started only by `docker compose --profile scheduler up -d`.
+  #
+  # OFF BY DEFAULT ON PURPOSE. This service makes outbound requests to FIRST
+  # every day, unattended. A stack that began phoning out because somebody ran
+  # `docker compose up` would be making an egress decision on the operator's
+  # behalf, which is the one thing the gate in this product exists to prevent.
+  #
+  # The cost of leaving it off is real and worth stating: EPSS publishes today's
+  # scores and never republishes yesterday's, so every day this does not run is
+  # a permanent hole in every velocity figure computed afterwards, and a
+  # forecast that never resolves can never be scored.
+  scheduler:
+    profiles: ["scheduler"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      SKOPOS_DATABASE_URL: postgresql://skopos:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/skopos
+      # Override to run more often when verifying the wiring. The default is a
+      # day because that is the publication cadence of the data.
+      SKOPOS_SCHEDULE_SECONDS: ${SKOPOS_SCHEDULE_SECONDS:-86400}
+    entrypoint: ["/bin/sh", "tools/daily.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   skopos-db:

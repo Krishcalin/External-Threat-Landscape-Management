@@ -172,3 +172,33 @@ export interface CrosshairView {
    *  exactly the reading this product has to refuse. */
   not_targeting: string
 }
+
+/** Weaponisation latency: what happened to comparable past vulnerabilities.
+ *
+ *  Class-level, never per-asset. `median` is the middle of a REFERENCE CLASS,
+ *  and attaching it to a row would read as "this asset has 8 days" — which is
+ *  a forecast about one estate, not a base rate over a population. */
+export interface LatencyClass {
+  reference_class: string
+  ransomware: boolean
+  weaponised: boolean
+  samples: number
+  usable: boolean
+  p25: number | null
+  median: number | null
+  p75: number | null
+  spread_days: number | null
+  note: string
+}
+
+export interface LatencyReport {
+  classes: Record<string, LatencyClass>
+  usable_classes: number
+  total_classes: number
+  observations: number
+  excluded: Record<string, number>
+  window_since: string
+  not_a_forecast: string
+  artefact_coverage: number | null
+  coverage_meaning: string | null
+}

@@ -504,11 +504,33 @@ resource an attacker has *already* claimed.
 | `controls.py` | ISO 27001:2022 + NIST CSF 2.0 — contributes / does not / evidence, no percentage |
 | `cii.py` | the CII exposure register; records declarations, designates nothing |
 
+### Modules that perform I/O
+
+Three, not one. The enforced rule is **not** "only `egress.py` may do I/O" — it
+is that a module may do I/O only if it carries a `# NETWORK-BOUNDARY:
+<operation>` marker naming a real key in `gate.OPERATIONS`
+(`tests/test_egress_boundary.py`). An earlier version of this document claimed
+`egress.py` was the only one, which was never true of the shipped code.
+
+| Module | Marker | What it contacts |
+|---|---|---|
+| `collect/egress.py` | `http_probe`, `dns_resolve_recursive`, … | the customer's own estate — every target-contacting operation |
+| `collect/ct.py` | its own | certificate transparency logs |
+| `core/alerting.py` | `alert_dispatch` | the operator's OWN webhook or SMTP server — outbound only, never a target |
+
+`alerting.py` is the one that contacts something the customer configured rather
+than something the customer owns, and it takes no permit: the gate authorises
+contact with a TARGET, and a Slack webhook is not in an attack-surface scope.
+What constrains it instead is that the destination must be set in the
+environment and must be `https`, and that **no HTTP route can trigger it** — a
+GET that made the server post findings outward would let anyone who can reach
+the API choose the moment the estate is described to a third party.
+
 ### `collect/` — I/O, all through one door
 
 | Module | Responsibility |
 |---|---|
-| `egress.py` | **the only** module that performs network I/O |
+| `egress.py` | the door **discovery and probing** go through; every target-contacting operation is here |
 | `report.py` | one degradation vocabulary for every subsystem |
 | `registry.py` | sources, terms, review dates, defaults |
 | `run.py` | the only caller of `authorise()` for discovery |

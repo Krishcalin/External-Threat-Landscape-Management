@@ -391,6 +391,56 @@ def write(path: Path, payload: Dict) -> None:
     print(f"  wrote {path.relative_to(ROOT)}  ({size:,} bytes)")
 
 
+def _refresh_artefacts_only() -> int:
+    """Rewrite data/artefacts.json and nothing else.
+
+    The CVE scope comes from the VENDORED catalogue rather than a fresh fetch,
+    so the artefact index lines up with the KEV file actually in the repo. A
+    scope drawn from a newly published catalogue would index CVEs the vendored
+    corpus does not contain, and the join would silently never ask about them.
+    """
+    kev_path = DATA / "kev.json"
+    if not kev_path.exists():
+        print(f"no vendored catalogue at {kev_path}; run without "
+              f"--only-artefacts first")
+        return 1
+    kev = json.loads(kev_path.read_text(encoding="utf-8"))
+    cves = {v["cveID"].strip().upper() for v in kev.get("vulnerabilities", [])
+            if v.get("cveID")}
+    version = (kev.get("_meta") or {}).get("catalog_version") or         kev.get("catalogVersion", "")
+    print(f"Scoping to the vendored catalogue: {len(cves):,} CVEs "
+          f"(catalogue {version})")
+
+    print("Fetching exploit artefacts (Exploit-DB, Metasploit, Nuclei)…")
+    artefacts = fetch_artefacts(cves)
+    for name, state in artefacts["sources"].items():
+        print(f"  {name:12} {state}")
+    covered = len(artefacts["artefacts"])
+    print(f"  {covered:,} of {len(cves):,} KEV CVEs have a published artefact")
+    write(DATA / "artefacts.json", {
+        "_meta": {
+            "sources": {"exploitdb": EXPLOITDB_URL,
+                        "metasploit": METASPLOIT_URL,
+                        "nuclei": NUCLEI_URL},
+            "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "scope": "KEV subset",
+            "kev_catalogue": version,
+            "reports": artefacts["sources"],
+            "covered": covered,
+            "note": "An artefact is an OBSERVATION that working code exists; "
+                    "EPSS is a FORECAST that exploitation will happen. They "
+                    "are correlated and are not the same claim. This does not "
+                    "change a TEPS while the corpus is KEV-only — "
+                    "Exploitability short-circuits to 1.0 on KEV membership — "
+                    "and is carried for weaponisation latency and for evidence "
+                    "a defender can act on.",
+        },
+        "artefacts": artefacts["artefacts"],
+    })
+    print("\nDone. Commit the result: the corpus is a versioned input.")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--full-epss", action="store_true",
@@ -401,10 +451,20 @@ def main(argv=None) -> int:
                              "few minutes: one request per KEV CVE)")
     parser.add_argument("--skip-artefacts", action="store_true",
                         help="do not refresh data/artefacts.json")
+    parser.add_argument("--only-artefacts", action="store_true",
+                        help="refresh ONLY data/artefacts.json, reading the CVE "
+                             "scope from the vendored data/kev.json. Every "
+                             "other corpus is left byte-identical — the other "
+                             "paths here refetch KEV and EPSS unconditionally, "
+                             "so this is the flag to reach for when the "
+                             "artefact index is the only thing that is stale")
     parser.add_argument("--check", action="store_true",
                         help="report whether the vendored copy is current "
                              "without writing anything")
     args = parser.parse_args(argv)
+
+    if args.only_artefacts:
+        return _refresh_artefacts_only()
 
     print("Fetching CISA KEV…")
     kev = fetch_kev()
