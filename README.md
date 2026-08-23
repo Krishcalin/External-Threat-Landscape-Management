@@ -435,8 +435,18 @@ prediction claim the backtesting harness cannot support.
 | **README.md** (this file) | what the product is, and how to run it |
 | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | how it is built: the gate, the egress boundary, the pipeline, storage, the module map, and the invariants |
 | **CLAUDE.md** | the decision log, with the reasoning and the measurements behind each |
-| **[docs/P2-SCOPE.md](docs/P2-SCOPE.md)** | what P2 will build, what it measured first, and the open decisions |
 | **docs/P1-BUILD-SPEC.md** | the adversarial design pass over P1, and the 86 problems it raised |
+| **[docs/P2-SCOPE.md](docs/P2-SCOPE.md)** | P2: prioritisation that survives the NVD gap. Written in advance |
+| **[docs/P3-SCOPE.md](docs/P3-SCOPE.md)** | P3: decisions, and the two workstreams the measurements closed. **Retrospective** |
+| **[docs/P4-SCOPE.md](docs/P4-SCOPE.md)** | P4: the India compliance pack, and the things it will not say. **Retrospective** |
+| **[docs/P5-SCOPE.md](docs/P5-SCOPE.md)** | P5: the orphan audit, TAXII, tenancy — and what it got wrong. **Retrospective** |
+| **[docs/P6-SCOPE.md](docs/P6-SCOPE.md)** | P6: third-party posture and the projections. Written in advance |
+| **[docs/P7-SCOPE.md](docs/P7-SCOPE.md)** | P7: auth, ad-hoc lookup, brand imitation, the graph. Written in advance |
+
+Phase documents marked **Retrospective** were written after the phase was built.
+P2, P6 and P7 were written before, and carry a "what would make this plan wrong"
+section for that reason — a retrospective presented as foresight would be
+exactly the kind of quiet overclaim these documents exist to record.
 
 [↑ Contents](#contents)
 
