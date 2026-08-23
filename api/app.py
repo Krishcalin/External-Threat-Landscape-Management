@@ -58,9 +58,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-#: In-memory for now. Persistence is a later phase; keeping it explicit here
-#: stops the API pretending to a durability it does not have.
-STATE: Dict[str, Any] = {"findings": [], "summary": None, "scanned_at": None}
+def _findings_store():
+    """Scan results live in Postgres, not in this process.
+
+    They used to live in a module-level dict here. Measured: a scan produced 64
+    findings across 7 assets, the container restarted, and GET /summary answered
+    "no scan has been run" — while scope, ownership, the audit chain and every
+    DNS observation survived. The product's OUTPUT was the only thing that did
+    not, a second replica would have disagreed with the first, and run-over-run
+    diff was impossible rather than merely unbuilt.
+    """
+    from core.findings_store import open_findings_store
+    from core.store import StoreUnavailable
+    try:
+        return open_findings_store()
+    except StoreUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 def _corpus():
@@ -111,7 +124,9 @@ def run_scan(inventory_path: str = Query(..., description="CSV or JSON asset inv
              days_exposed: int = Query(0, ge=0),
              sector_match: float = Query(0.0, ge=0.0, le=1.0),
              geo_match: float = Query(0.0, ge=0.0, le=1.0),
-             tech_match: float = Query(0.0, ge=0.0, le=1.0)) -> Dict[str, Any]:
+             tech_match: float = Query(0.0, ge=0.0, le=1.0),
+             actor: str = Query("api", description=
+                 "who ran this; asserted, not authenticated")) -> Dict[str, Any]:
     """Join an inventory against the exploited catalogue and score the result."""
     corpus = _corpus()
     try:
@@ -160,26 +175,80 @@ def run_scan(inventory_path: str = Query(..., description="CSV or JSON asset inv
 
     ranked = engine.rank(findings)
     unmatched = len(match.unmatched_assets(assets, [f for f in findings]))
-    STATE["findings"] = ranked
-    STATE["summary"] = engine.summarise(ranked, unmatched=unmatched,
-                                        unmappable=len(unmappable))
-    STATE["scanned_at"] = date.today().isoformat()
+    summary_payload = engine.summarise(ranked, unmatched=unmatched,
+                                       unmappable=len(unmappable))
+    catalogue_status = intel_status()
+
+    store = _findings_store()
+    run_id = store.record_run(
+        actor=actor, inventory=inventory_path, catalogue=catalogue_status,
+        assets_read=len(assets), rows_rejected=len(rejected),
+        assets_unmatched=unmatched, summary=summary_payload,
+        findings=[f.to_dict() for f in ranked])
+
+    diff = store.diff_against_previous(run_id)
     return {
-        "scanned_at": STATE["scanned_at"],
-        "catalogue": intel_status(),
+        "run": run_id,
+        "scanned_at": date.today().isoformat(),
+        "catalogue": catalogue_status,
         "assets_read": len(assets),
         "rows_rejected": len(rejected),
-        "summary": STATE["summary"],
+        "summary": summary_payload,
         "unmappable_cloud_resources": unmappable,
+        # What is NEW since last time is most of why a monitoring product is
+        # worth running continuously rather than once. It was not merely
+        # unbuilt before persistence — it was impossible.
+        "since_last_run": {
+            "previous_run": diff.previous_run,
+            "headline": diff.headline(),
+            "new": len(diff.new),
+            "resolved": len(diff.resolved),
+            "changed_band": len(diff.reband),
+            "carried": diff.carried,
+        },
     }
 
 
 @app.get("/api/v1/summary", tags=["findings"])
 def summary() -> Dict[str, Any]:
-    if STATE["summary"] is None:
+    run = _findings_store().latest_run()
+    if run is None:
         raise HTTPException(status_code=404, detail="no scan has been run")
-    return {"scanned_at": STATE["scanned_at"], **STATE["summary"],
+    return {"run": run["id"], "scanned_at": run["scanned_at"],
+            **(run["summary"] or {}),
+            # The catalogue THAT ANSWERED this run, not whatever is vendored
+            # now. A refresh between the scan and this request would otherwise
+            # silently re-attribute the result to a corpus that never saw it.
+            "catalogue_at_scan": {"version": run["catalog_version"],
+                                  "age_days": run["catalog_age_days"]},
             "catalogue": intel_status()}
+
+
+@app.get("/api/v1/runs", tags=["findings"])
+def runs(limit: int = Query(20, ge=1, le=200)) -> Dict[str, Any]:
+    rows = _findings_store().runs(limit)
+    return {"total": len(rows), "runs": rows}
+
+
+@app.get("/api/v1/changes", tags=["findings"])
+def changes(run: Optional[int] = None) -> Dict[str, Any]:
+    """What is new since the previous scan.
+
+    A finding's identity is (asset, cve) — never its TEPS or its band, both of
+    which move when EPSS moves. Keying on either would report a score change as
+    a new finding and flood this list with things already seen, which is the
+    fastest way to make a feed unreadable.
+    """
+    diff = _findings_store().diff_against_previous(run)
+    return {
+        "previous_run": diff.previous_run,
+        "is_baseline": diff.is_baseline,
+        "headline": diff.headline(),
+        "new": diff.new,
+        "resolved": diff.resolved,
+        "changed_band": diff.reband,
+        "carried": diff.carried,
+    }
 
 
 @app.get("/api/v1/findings", tags=["findings"])
@@ -188,16 +257,14 @@ def findings(limit: int = Query(100, ge=1, le=500),
              reconciliation: Optional[str] = None) -> Dict[str, Any]:
     """Ranked findings. The total is always stated, so a capped list never
     reads as a complete one."""
-    rows = STATE["findings"]
-    if band:
-        rows = [f for f in rows if f.score.band == band]
-    if reconciliation:
-        rows = [f for f in rows
-                if f.reconciliation and f.reconciliation.value == reconciliation]
+    store = _findings_store()
+    rows = store.findings(limit=limit, band=band, reconciliation=reconciliation)
+    run = store.latest_run()
     return {
+        "run": run["id"] if run else None,
         "total": len(rows),
-        "returned": min(limit, len(rows)),
-        "findings": [f.to_dict() for f in rows[:limit]],
+        "returned": len(rows),
+        "findings": rows,
     }
 
 
