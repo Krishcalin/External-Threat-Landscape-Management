@@ -1111,6 +1111,136 @@ def assess_suppliers(actor: str = Query(..., min_length=3)) -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Ask anything. Passive, and structurally so.
+
+
+class _LookupBody(BaseModel):
+    target: str
+    actor: str
+
+
+@app.post("/api/v1/lookup", tags=["lookup"])
+def lookup_target(body: _LookupBody) -> Dict[str, Any]:
+    """What the public record says about a domain, a host, an address or a /24.
+
+    A POST because it performs outbound lookups and an actor is required — every
+    permit names one, and an unattributed query against somebody else's estate
+    is not something this product will do.
+
+    PASSIVE AND UNABLE TO BE OTHERWISE. Ownership of a target somebody typed
+    into a box cannot be proven, and the gate refuses every active operation
+    against an unverified asset before scope is consulted. So this reports what
+    the target PUBLISHES and cannot report what it runs — which is stated in the
+    response rather than left for somebody to infer from a thin result.
+    """
+    from collect import ct as _ct
+    from collect import lookup_scan
+    from collect import takeover_scan
+    from core import gate as _gate
+    from core import lookup as _lookup
+    from core import suppliers as _suppliers
+    from core.scope import Scope, ScopeKind, ScopeRule
+
+    try:
+        target = _lookup.parse(body.target)
+    except _lookup.TargetError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error": str(exc),
+            "accepts": ["a domain (example.com)", "a hostname (www.example.com)",
+                        "an address (203.0.113.4)",
+                        f"a block up to /{32 - (_lookup.MAX_CIDR_HOSTS.bit_length() - 1)}"
+                        " (203.0.113.0/24)"]})
+
+    try:
+        observed = lookup_scan.observe(target, actor=body.actor)
+    except Exception as exc:                                    # noqa: BLE001
+        raise HTTPException(status_code=502, detail={
+            "error": f"{type(exc).__name__}: {exc}",
+            "why": "the lookups failed; no partial result is returned as fact"})
+
+    found = _lookup.Lookup(
+        target=target,
+        reverse_dns=observed["reverse_dns"],
+        reports=observed["reports"],
+        unavailable=lookup_scan.unavailable_sources(target))
+
+    if not target.is_network:
+        found.posture = _suppliers.assess(
+            _suppliers.Supplier(name=target.value, domain=target.value,
+                                tier=_suppliers.Tier.ROUTINE,
+                                declared_by=body.actor),
+            records=observed["records"])
+
+        # Certificate transparency: the SURFACE factor, and the one source that
+        # finds names nobody told us about. A per-name scope, as everywhere else
+        # a third party is read passively.
+        scope = Scope([ScopeRule(kind=ScopeKind.DOMAIN, value=target.value)])
+        try:
+            permit = _gate.authorise(target.value, _ct.OPERATION, body.actor,
+                                     scope, kind=ScopeKind.DOMAIN)
+            names, report = _ct.from_certspotter(target.value, permit=permit)
+            # (name, first_seen) tuples, not objects.
+            found.names = sorted({n for n, _ in names})
+            found.reports.append(report)
+        except Exception as exc:                                # noqa: BLE001
+            # A CT failure leaves SURFACE unobserved rather than zero. Reporting
+            # "0 names" for a source that errored is our outage rendered as
+            # their absence.
+            found.unavailable.append({
+                "source": "certspotter",
+                "why": f"{type(exc).__name__}: {str(exc)[:80]}",
+                "cost": "names visible only in certificate transparency were "
+                        "not enumerated",
+                "terms": "open"})
+
+        try:
+            permit = _gate.authorise(target.value, takeover_scan.RDAP_OPERATION,
+                                     body.actor, scope, kind=ScopeKind.DOMAIN)
+            status, detail = takeover_scan.rdap_lookup(permit, target.value)
+            found.registration = {"status": status.value, "detail": detail,
+                                  # RDAP tells us the registration EXISTS. It is
+                                  # not read for a transfer lock here, so the
+                                  # REGISTRATION factor stays unobserved rather
+                                  # than being scored from a field nobody read.
+                                  "locked": None}
+        except Exception:                                       # noqa: BLE001
+            pass
+
+    payload = found.to_dict()
+    payload["coverage"] = {
+        "attempted": observed["attempted"],
+        "observed": observed["observed"],
+        "refused": observed["refused"],
+    }
+    return payload
+
+
+@app.get("/api/v1/lookup/sources", tags=["lookup"])
+def lookup_sources() -> Dict[str, Any]:
+    """Every source a lookup can consult, and which are configured.
+
+    Public knowledge about the instance, not about anybody's estate: it says
+    which questions this deployment is able to answer at all. A user reading a
+    thin result needs to be able to tell "nothing there" from "no key".
+    """
+    from collect import registry
+    return {
+        "sources": [
+            {"name": source.name, "operation": source.operation,
+             "terms": source.terms.value, "configured": source.configured,
+             "default_on": source.default_on,
+             "credential_env": source.credential_env, "note": source.note}
+            for source in registry.REGISTRY
+        ],
+        "terms_reviewed_on": registry.TERMS_REVIEWED_ON,
+        "note": ("A CREDENTIALED source is off until its key is set, and a "
+                 "lookup running without one reports it as unavailable rather "
+                 "than returning a clean result. Terms are the operator's to "
+                 "accept, not this product's."),
+    }
+
+
 @app.get("/api/v1/compliance/controls", tags=["compliance"])
 def compliance_controls(framework: Optional[str] = None) -> Dict[str, Any]:
     """Which controls this product helps evidence, and what it does not do.

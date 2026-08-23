@@ -94,6 +94,32 @@ REGISTRY: Tuple[Source, ...] = (
            Terms.NONCOMMERCIAL, default_on=False,
            note="free tier reads as excluding commercial use; SKOPOS must not "
                 "make that call for the operator"),
+
+    # ── keyed sources, registered so their ABSENCE is reportable ────────────
+    # These are the only route to service-level data about a target whose
+    # ownership cannot be proven: SKOPOS may not probe it, so the alternative is
+    # a third party who already did. Each is off until a key exists, and a
+    # lookup running without one says so rather than returning a clean result.
+    #
+    # Registering them while unimplemented is deliberate. `unavailable` on a
+    # lookup is built from this table, so "we cannot see open ports because
+    # nobody supplied a Shodan key" is a fact the product can state today.
+    Source("shodan", "advisory_lookup", DataClass.NAME_INDEX, Terms.CREDENTIALED,
+           default_on=False, credential_env="SKOPOS_SHODAN_API_KEY",
+           note="the only passive route to OPEN PORTS AND SERVICES for a target "
+                "this product may not probe. Paid tiers; terms restrict "
+                "redistribution, which the operator accepts, not SKOPOS"),
+    Source("virustotal", "advisory_lookup", DataClass.NAME_INDEX,
+           Terms.CREDENTIALED, default_on=False,
+           credential_env="SKOPOS_VIRUSTOTAL_API_KEY",
+           note="free tier is 4 requests/minute and reads as non-commercial. "
+                "Reputation is an OBSERVATION with a source and a date, never "
+                "an attribution of intent"),
+    Source("hibp", "advisory_lookup", DataClass.NAME_INDEX, Terms.CREDENTIALED,
+           default_on=False, credential_env="SKOPOS_HIBP_API_KEY",
+           note="breach corpus membership. Paid key, rate limited. Says an "
+                "address appeared in a published breach, never that an account "
+                "is compromised now"),
 )
 
 BY_NAME: Dict[str, Source] = {s.name: s for s in REGISTRY}

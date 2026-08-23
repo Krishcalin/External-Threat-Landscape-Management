@@ -57,6 +57,9 @@ class RRType(enum.IntEnum):
     NS = 2
     CNAME = 5
     SOA = 6
+    #: Reverse DNS. For an ADDRESS this is very nearly the only thing a passive
+    #: lookup can learn without a third party who already scanned it.
+    PTR = 12
     MX = 15
     TXT = 16
     AAAA = 28
@@ -261,7 +264,7 @@ def _render(data: bytes, offset: int, rtype: int, rdata: bytes) -> Optional[str]
         return _socket.inet_ntop(_socket.AF_INET, rdata)
     if rtype == RRType.AAAA and len(rdata) == 16:
         return _socket.inet_ntop(_socket.AF_INET6, rdata)
-    if rtype in (RRType.CNAME, RRType.NS):
+    if rtype in (RRType.CNAME, RRType.NS, RRType.PTR):
         rendered, _ = _read_name(data, offset)
         return rendered
     if rtype == RRType.MX and len(rdata) >= 3:
