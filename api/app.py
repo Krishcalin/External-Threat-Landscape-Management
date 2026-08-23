@@ -102,6 +102,34 @@ def health() -> Dict[str, Any]:
     }
 
 
+@app.get("/api/v1/refusals", tags=["intelligence"])
+def refusal_register() -> Dict[str, Any]:
+    """What this product will not tell you, and the measurement behind each.
+
+    PUBLIC, for the same reason the rule catalogue is: the first question
+    anybody comparing SKOPOS to a commercial platform asks is why it does not
+    do X, and the answer should be one request away rather than archaeology
+    through seven phase documents. It describes the software and names no
+    asset.
+    """
+    from core import refusals
+    return refusals.payload()
+
+
+@app.get("/api/v1/rules", tags=["intelligence"])
+def rule_catalogue() -> Dict[str, Any]:
+    """Every check this product performs, named and listable.
+
+    PUBLIC on purpose — see `api/auth_routes.PUBLIC_EXACT`. Somebody deciding
+    whether to install SKOPOS should be able to read what it checks first, and
+    a catalogue behind a login is a catalogue nobody reads. It contains no
+    finding, no asset and nothing about any estate: it is a description of the
+    software, which is already open source.
+    """
+    from core import rules
+    return rules.catalogue()
+
+
 @app.get("/api/v1/intel", tags=["intelligence"])
 def intel_status() -> Dict[str, Any]:
     """The corpus, and how old it is.

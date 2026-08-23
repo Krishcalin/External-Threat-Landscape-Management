@@ -1,0 +1,812 @@
+{
+ "_meta": {
+  "built_on": "2026-08-23",
+  "source": "ransomware.live",
+  "source_url": "https://api.ransomware.live/v2/recentvictims",
+  "terms": "Public aggregator of ransomware leak-site victim listings. Free, no key. Indexes what groups published themselves.",
+  "listings": 100,
+  "note": "Victim names published by ransomware groups on their own public index pages. A listing is a CLAIM BY THAT GROUP. SKOPOS reads the index and never downloads what was published — see core/gate.py leak_data_download."
+ },
+ "listings": [
+  {
+   "victim": "PappyJoe: Healthcare Management System",
+   "group": "kazu",
+   "published": "2026-08-23",
+   "domain": "pappyjoe.com",
+   "claim": "PappyJoe is an India-based healthcare technology company that provides a cloud-based practice management platform for clinics, hospitals, and healthcare professionals. The platform helps manage appointments, electronic medical records (EMR), billing, prescriptions, patient communication, and administrative tasks in one system",
+   "country": "US"
+  },
+  {
+   "victim": "Instituto Ferrero de Neurología y Sueño",
+   "group": "kazu",
+   "published": "2026-08-23",
+   "domain": "ifn.com.ar",
+   "claim": "Instituto Ferrero de Neurología y Sueño (IFN) is a specialized medical center in Argentina that focuses on the diagnosis and treatment of neurological and sleep disorders. It provides services such as neurology consultations, sleep studies, diagnostic testing, and personalized treatment plans. Using advanced medical technology and a team of specialists, IFN helps patients receive comprehensive car",
+   "country": "AR"
+  },
+  {
+   "victim": "Brazil Mobilemed: Cloud PACS Platform",
+   "group": "kazu",
+   "published": "2026-08-23",
+   "domain": "mobilemed.com.br",
+   "claim": "Mobilemed is a Brazil-based health technology company that provides a cloud-based PACS (Picture Archiving and Communication System) for radiologists, hospitals, and diagnostic imaging centers. Its platform enables healthcare professionals to securely store, access, manage, and share medical images and diagnostic reports from anywhere, supporting teleradiology and improving workflow efficiency.",
+   "country": "BR"
+  },
+  {
+   "victim": "Canada Yocale: Appointment Management System",
+   "group": "kazu",
+   "published": "2026-08-23",
+   "domain": "www.yocale.com",
+   "claim": "Yocale is a cloud-based business management platform that helps appointment-based businesses streamline their daily operations. Founded in Canada, the platform is used by healthcare providers, beauty salons, wellness centers, and other service businesses to manage appointments, client records, payments, and communications in one centralized system.",
+   "country": "CA"
+  },
+  {
+   "victim": "PawlyClinic: Digital Veterinary Care Platform",
+   "group": "kazu",
+   "published": "2026-08-23",
+   "domain": "www.pawlyclinic.com",
+   "claim": "PawlyClinic is a digital veterinary care platform that connects pet owners with licensed veterinarians through online consultations, appointment booking, and in-clinic referrals. It provides a convenient way for users to access veterinary advice, manage pet health records, and receive treatment without always needing to visit a clinic physically.",
+   "country": "US"
+  },
+  {
+   "victim": "Dr Akbar Niazi Teaching Hospital",
+   "group": "kazu",
+   "published": "2026-08-23",
+   "domain": "www.anth.pk",
+   "claim": "Dr. Akbar Niazi Teaching Hospital (ANTH) is a 500-bed tertiary care teaching hospital located in Islamabad, Pakistan. The hospital provides a wide range of healthcare services, including emergency care, surgery, cardiology, orthopedics, pediatrics, gynecology, oncology, diagnostic laboratory services, and specialized outpatient clinics. As a teaching hospital, ANTH is affiliated with medical educa",
+   "country": "PK"
+  },
+  {
+   "victim": "Centro Médico Especializado OSI: Healthcare Solutions",
+   "group": "kazu",
+   "published": "2026-08-23",
+   "domain": "centromedicoosi.com",
+   "claim": "Centro Médico Especializado OSI is a healthcare provider based in Peru that specializes in physical medicine, rehabilitation, physiotherapy, chiropractic care, and alternative medicine treatments. Founded in 1999 and headquartered in Lima, OSI has grown into one of the country's largest rehabilitation and physiotherapy networks, operating multiple clinics across the Lima metropolitan area. wellnes",
+   "country": "MX"
+  },
+  {
+   "victim": "Meducar: Telemedicine and Patient Management System",
+   "group": "kazu",
+   "published": "2026-08-23",
+   "domain": "meducar.com",
+   "claim": "Meducar is a Latin American healthtech platform that provides software for doctors and clinics to manage medical appointments, electronic health records, and patient communication in one system. It helps healthcare professionals organize their daily practice by offering tools such as online scheduling, clinical history management, electronic prescriptions, and telemedicine services.",
+   "country": "BR"
+  },
+  {
+   "victim": "ConsultorioMovil: Telemedicine and Healthcare System",
+   "group": "kazu",
+   "published": "2026-08-23",
+   "domain": "consultoriomovil.net",
+   "claim": "digital healthcare platform designed to help doctors, clinics, and medical professionals manage their daily operations more efficiently. It provides tools for scheduling patient appointments, maintaining electronic medical records, and conducting telemedicine consultations through online video or messaging. The platform also supports clinical documentation, patient communication, and administrativ",
+   "country": "MX"
+  },
+  {
+   "victim": "Woodlore International Inc.",
+   "group": "metaencryptor",
+   "published": "2026-08-23",
+   "domain": "www.woodlore.ca",
+   "claim": "Woodlore is manufacturer specializes in laminate casegood production for furniture.\nRevenue $ 30 M",
+   "country": "CA"
+  },
+  {
+   "victim": "Weber Water Resources",
+   "group": "metaencryptor",
+   "published": "2026-08-23",
+   "domain": "www.weberwaterresources.com",
+   "claim": "Founded in 1910, Weber Water Resources has been providing the widest range of water resource solutions at the lowest available risk to clients for over a century.\nThrough our superior problem solving ability, Weber Water Resources partners with public and private clients to achieve the most equitable outcome possible on each project.\nrevenue $25 M",
+   "country": "US"
+  },
+  {
+   "victim": "MPA Pharma GmbH",
+   "group": "metaencryptor",
+   "published": "2026-08-23",
+   "domain": "mpapharma.com",
+   "claim": "MPA Pharma GmbH is an internationally active, rapidly growing company specializing in the import and trade of high-quality pharmaceuticals, including both patented and generic products. With over 35 years of expertise in the pharmaceutical market, they also provide contract manufacturing services for third parties. Their primary clients include pharmacies and businesses in need of reliable pharmac",
+   "country": "DE"
+  },
+  {
+   "victim": "Aquamar Inc",
+   "group": "metaencryptor",
+   "published": "2026-08-23",
+   "domain": "aquamarseafood.com",
+   "claim": "Aquamar, Inc. specializes in providing high-quality, wild-caught seafood products that are both delicious and nutritious.\nThe company targets markets in the U.S., Canada, and Latin America, focusing on retail and foodservice sectors.",
+   "country": "US"
+  },
+  {
+   "victim": "Corona Corporation",
+   "group": "metaencryptor",
+   "published": "2026-08-23",
+   "domain": "corona.co.jp",
+   "claim": "The company specializes in creating a comfortable home environment, focusing on heating, cooling and hot water technologies.\nIt was founded at April 1937, and now have more than 2000 employee.\nCorona Corporation is stock listed, ticker 5909.T at Tokyo Stock Exchange (Standard)",
+   "country": "JP"
+  },
+  {
+   "victim": "FactoryFive",
+   "group": "metaencryptor",
+   "published": "2026-08-23",
+   "domain": "factoryfive.com",
+   "claim": "Factory Five Racing Inc — kit-car manufacturer (Cobra replicas, GTM, Type 65 Coupe, 33 Hot Rod). 9 Tow Road, Wareham MA 02571-1086. ~90 employees, 158 endpoints. Revenue $5.5-6.5M/yr (credit card processing ~$4.3M, avg ticket $1245).\n\nExfiltrated data categories (~130GB): correspondence (PST archives), CRM contacts (GoldMine), ERP/pricing, engineering CAD (SolidWorks/Rhino), banking statements, in",
+   "country": "US"
+  },
+  {
+   "victim": "Skyline Implants & Periodontics",
+   "group": "Barracuda",
+   "published": "2026-08-23",
+   "domain": "skylineperio.com",
+   "claim": "Full personal and servers files dumps from Skyline Implants & Periodontics company. The data files contain: medical documents of patients (including MRI scans of various parts of the body — files with the .dcm extension), personal photos, and the personal data of the doctor, Scott Ferguson, as well as documents from the company Skyline Implants & Periodontics — in particular, information on equipm",
+   "country": "US"
+  },
+  {
+   "victim": "Namyang Industrial Co., Ltd.",
+   "group": "Barracuda",
+   "published": "2026-08-23",
+   "domain": "nyi.co.kr",
+   "claim": "Selling fresh full database dumps of company Namyang Industrial Co., Ltd. (renamed to Namyang Nexmo). \nInfrastructure dump, not website! There information about employers, manufacturing, parts, clients, partners and etc. Total lines (csv format): 17 641 181. | Severity: HIGH | Size: 2.51 GB | Status: free | FREE",
+   "country": "KR"
+  },
+  {
+   "victim": "Clinical Associates of the Finger Lakes (CAFL)",
+   "group": "Barracuda",
+   "published": "2026-08-23",
+   "domain": "clinassoc.com",
+   "claim": "The company mishandled its clients' and employees' data, which is why it was leaked. We extracted all files and documents from the infrastructure. These documents included children's medical records, personal information of parents and employees, a full dump of all emails from the mail server, and much more.\nTarget website: https://www.clinassoc.com/\n | Severity: HIGH | Size: 447 GB | Status: sell",
+   "country": "US"
+  },
+  {
+   "victim": "PCA *****",
+   "group": "majinahanashi",
+   "published": "2026-08-23",
+   "domain": "",
+   "claim": "PUBLICATION SCHEDULED. [LEAK / 1844 FILES]",
+   "country": ""
+  },
+  {
+   "victim": "ReliaQuest, LLC",
+   "group": "shinyhunters",
+   "published": "2026-08-23",
+   "domain": "reliaquest.com",
+   "claim": "This time the post is about you , not us. Let Mandiant report and advise on us accurately, go away. DISCLAIMER: This information is being provided \"as is\" for informational purposes only. We do not endorse any commercial entity, product, company, or service, including any entities, products, or services linked within this post. Any reference to specific commercial entities, products, processes, or",
+   "country": "US"
+  },
+  {
+   "victim": "el-group",
+   "group": "incransom",
+   "published": "2026-08-22",
+   "domain": "el-group.ch",
+   "claim": "Unauthorized access has been gained to the company's confidential files, including client data, proprietary R&D, and financial documentation.",
+   "country": "CH"
+  },
+  {
+   "victim": "AmSpec",
+   "group": "Helix",
+   "published": "2026-08-22",
+   "domain": "amspecgroup.com",
+   "claim": "AmSpec is live. T1 unlocks on the current 24-hour cadence, then 24 hours per remaining tier.",
+   "country": "US"
+  },
+  {
+   "victim": "Vietnam Electricity(EVNHANOI)",
+   "group": "emperador",
+   "published": "2026-08-22",
+   "domain": "evn.com.vn",
+   "claim": "Vietnam Electricity (EVN), legally known as Tập đoàn Điện lực Việt Nam, is the largest power company and the sole national electric utility in Vietnam. Fully owned and controlled by the Vietnamese government since its inception in 1994, EVN operates as a vertically integrated monopoly responsible for the nationwide generation, transmission, and distribution of electricity, as well as international",
+   "country": "VN"
+  },
+  {
+   "victim": "Integrated Health Systems",
+   "group": "coinbasecartel",
+   "published": "2026-08-22",
+   "domain": "ihs911.com",
+   "claim": "[AI generated] N/A",
+   "country": "US"
+  },
+  {
+   "victim": "Tower Insurance",
+   "group": "coinbasecartel",
+   "published": "2026-08-22",
+   "domain": "tower.co.nz",
+   "claim": "[AI generated] Tower Insurance is a New Zealand-based insurance company offering a range of personal and business insurance products, including home, contents, car, travel, and commercial coverage. Founded in 1869, it operates primarily in New Zealand and the Pacific Islands. Tower is listed on the New Zealand Stock Exchange and is known for its digital-first approach, providing customers with onl",
+   "country": "NZ"
+  },
+  {
+   "victim": "Flecha Bus",
+   "group": "coinbasecartel",
+   "published": "2026-08-22",
+   "domain": "flechabus.com.ar",
+   "claim": "[AI generated] Flecha Bus is an Argentine intercity bus company operating in the passenger transportation industry. Founded in the mid-20th century, it provides long-distance coach services connecting Buenos Aires with various provinces across Argentina. Known for offering multiple service categories including standard and premium seating options, Flecha Bus is one of the prominent operators in Ar",
+   "country": "AR"
+  },
+  {
+   "victim": "OTEIS Conseil & Ingénierie",
+   "group": "coinbasecartel",
+   "published": "2026-08-22",
+   "domain": "oteis.fr",
+   "claim": "[AI generated] OTEIS Conseil & Ingénierie is a French engineering and consulting firm specializing in building and infrastructure design. Operating in France, the company provides technical expertise across disciplines including structural engineering, fluids, electricity, and project management. It serves sectors such as real estate, public works, and urban development, supporting both public and",
+   "country": "FR"
+  },
+  {
+   "victim": "Longhorn Investments",
+   "group": "coinbasecartel",
+   "published": "2026-08-22",
+   "domain": "longhorninvestments.com",
+   "claim": "[AI generated] N/A",
+   "country": ""
+  },
+  {
+   "victim": "Kessler Creative",
+   "group": "coinbasecartel",
+   "published": "2026-08-22",
+   "domain": "kesslercreative.com",
+   "claim": "[AI generated] N/A",
+   "country": "US"
+  },
+  {
+   "victim": "Klasko Immigration Law Partners",
+   "group": "coinbasecartel",
+   "published": "2026-08-22",
+   "domain": "klaskolaw.com",
+   "claim": "[AI generated] Klasko Immigration Law Partners is a US-based immigration law firm headquartered in Philadelphia, Pennsylvania. The firm specializes in business immigration law, assisting corporations and individuals with employment-based visas, green cards, and compliance matters. It serves multinational companies, healthcare organizations, and academic institutions, providing legal counsel on nav",
+   "country": "US"
+  },
+  {
+   "victim": "Patel",
+   "group": "coinbasecartel",
+   "published": "2026-08-22",
+   "domain": "patelcpaoffice.com",
+   "claim": "[AI generated] N/A\n\nThe name \"Patel\" is too generic to identify a specific company with reliable information. It is a common surname and business name used by numerous unrelated entities across many industries and countries. Please provide additional context such as the full company name, industry, or country to allow for an accurate description.",
+   "country": "US"
+  },
+  {
+   "victim": "Abacus Advisors",
+   "group": "coinbasecartel",
+   "published": "2026-08-22",
+   "domain": "abacusadv.com",
+   "claim": "[AI generated] N/A",
+   "country": ""
+  },
+  {
+   "victim": "LifeBank Microfinance Foundation",
+   "group": "coinbasecartel",
+   "published": "2026-08-22",
+   "domain": "lbf.ph",
+   "claim": "[AI generated] LifeBank Microfinance Foundation is a nonprofit microfinance institution operating in the Philippines. It provides financial services, including small loans, savings programs, and livelihood assistance, primarily to low-income individuals and underserved communities. The organization aims to promote financial inclusion and economic empowerment by offering accessible credit and suppo",
+   "country": "PH"
+  },
+  {
+   "victim": "PT Perusahaan Jamu Air Mancur",
+   "group": "coinbasecartel",
+   "published": "2026-08-22",
+   "domain": "",
+   "claim": "[AI generated] PT Perusahaan Jamu Air Mancur is an Indonesian company operating in the traditional herbal medicine industry. Based in Solo, Central Java, it manufactures and distributes jamu, a traditional Indonesian herbal remedy, along with related health and wellness products. Founded in 1963, the company is one of Indonesia's well-known herbal medicine producers, serving both domestic and expo",
+   "country": "ID"
+  },
+  {
+   "victim": "PT. Bank Perekonomian Rakyat Bintan",
+   "group": "coinbasecartel",
+   "published": "2026-08-22",
+   "domain": "",
+   "claim": "[AI generated] PT. Bank Perekonomian Rakyat Bintan is an Indonesian rural bank, known as a Bank Perkreditan Rakyat or BPR, operating in the Bintan regency of Riau Islands province, Indonesia. It provides basic financial services including savings, deposits, and credit facilities primarily to local communities, small businesses, and micro-enterprises. As a rural bank, it operates under supervision ",
+   "country": "ID"
+  },
+  {
+   "victim": "The Cecilian Bank",
+   "group": "Storm",
+   "published": "2026-08-22",
+   "domain": "thececilianbank.com",
+   "claim": "The Cecilian Bank is an FDIC-insured financial institution that offers a wide range of personal and business banking services, including checking and savings accounts, loans, and online banking. Their services cater to individuals, small businesses, and large corporations, providing competitive rates and tailored financial solutions. The bank emphasizes convenience with features like online accoun",
+   "country": "US"
+  },
+  {
+   "victim": "NovoCure Limited",
+   "group": "shinyhunters",
+   "published": "2026-08-22",
+   "domain": "novocure.com",
+   "claim": "This is a final warning to reach out by end of day 24 Aug 2026 before we leak along with several annoying (digital) problems that'll come your way. Make the right decision, don't be the next headline. | Updated: 22 Aug 2026 | Warning: FINAL WARNING PAY OR LEAK",
+   "country": "IL"
+  },
+  {
+   "victim": "BOK Financial",
+   "group": "shinyhunters",
+   "published": "2026-08-22",
+   "domain": "bokfinancial.com",
+   "claim": "This is a final warning to reach out by end of day 24 Aug 2026 before we leak along with several annoying (digital) problems that'll come your way. Make the right decision, don't be the next headline. | Updated: 22 Aug 2026 | Warning: FINAL WARNING PAY OR LEAK",
+   "country": "US"
+  },
+  {
+   "victim": "holzmarkt chemnitz",
+   "group": "spacebears",
+   "published": "2026-08-22",
+   "domain": "holzmarkt-chemnitz.de",
+   "claim": "Holzmarkt Chemnitz is a specialized retail store for building materials and wood products, operating two branches in Chemnitz (Fichtestraße and Kalkstraße). They serve as a competent partner for both professional builders and private customers.-Personal information of employees and clients -Financial documents-SQL DB https://holzmarkt-chemnitz.de/",
+   "country": "DE"
+  },
+  {
+   "victim": "Freelom",
+   "group": "spacebears",
+   "published": "2026-08-22",
+   "domain": "freelom.cz",
+   "claim": "Freelom.net s.r.o. is a Czech internet service provider and IT company based in Lomnice nad Popelkou, which has been operating since 2009 . The company's primary focus is providing wireless internet access via its own network, with services available 24 hours a day, 7 days a week.The company is led by two managing directors, Jiří Plichta and Petr Malý. A priority for Freelom.net is the speed, reli",
+   "country": "CZ"
+  },
+  {
+   "victim": "CRI Electric",
+   "group": "rhysida",
+   "published": "2026-08-22",
+   "domain": "crielectric.com",
+   "claim": "CRI Electric CRI Electric is a veteran-owned business based in San Antonio, providing professional electrical services since 1998. They cater to both residential and commercial clients, offering services such as emergency electrical repairs, EV charger installations, and home rewiring. We are pleased to present:Employee's federal account artifacts** (`HR-Confidential\\Israel's Forms`): Login.gov pe",
+   "country": "US"
+  },
+  {
+   "victim": "RXPE Group",
+   "group": "coinbasecartel",
+   "published": "2026-08-22",
+   "domain": "rxpe.com",
+   "claim": "[AI generated] N/A",
+   "country": "CN"
+  },
+  {
+   "victim": "Meridian Logistics Group",
+   "group": "thegentlemen",
+   "published": "2026-08-22",
+   "domain": "meridianlogisticgroup.com",
+   "claim": "Full network image staged. ERP exports, dispatch DB and payroll archives recovered. Pending final inventory before publication.",
+   "country": "US"
+  },
+  {
+   "victim": "AutoDie",
+   "group": "Storm",
+   "published": "2026-08-21",
+   "domain": "autodie-llc.com",
+   "claim": "Founded in 1962 and headquartered in Grand Rapids, MI, Autodie LLC is a company that specializes in design and manufacture large-scale dies for metal stamping. \nThe company headquarters is located in 44 Coldbrook Street NW, Grand Rapids, MI 49503, United States. 201-500 Employees",
+   "country": "US"
+  },
+  {
+   "victim": "Pinnacle Hospital",
+   "group": "Storm",
+   "published": "2026-08-21",
+   "domain": "pinnaclehealthcare.net",
+   "claim": "Pinnacle Healthcare / Pinnacle Hospital is a physician-owned, patient-centered healthcare organization operating an 18-bed acute care hospital in Crown Point, Indiana. The company provides a wide range of medical and surgical services through a network of more than 150 physicians and medical specialists. Its services include family medicine, internal medicine, gastroenterology, general surgery, gy",
+   "country": "US"
+  },
+  {
+   "victim": "Phoenix Group of Companies",
+   "group": "Storm",
+   "published": "2026-08-21",
+   "domain": "phoenixlitho.com",
+   "claim": "The Phoenix Group of Companies is a leading single-source provider of print solutions from concept to completion that produces high quality communications to help businesses rise above the competition and overcome everyday challenges. \nThe company headquarters is located in 11631 Caroline Road, Philadelphia, PA 19154, United States. 201-500 Employees",
+   "country": "US"
+  },
+  {
+   "victim": "Schardein Mechanical",
+   "group": "Storm",
+   "published": "2026-08-21",
+   "domain": "schardein.com",
+   "claim": "Schardein Mechanical is a trusted mechanical contractor providing top-of-the-line engineering services to commercial clients in Kentucky and Southern Indiana. Their offerings include design, installation, maintenance, and replacement of HVAC, plumbing, and process piping systems, with 24/7 availability for emergency services. The company caters to a diverse range of industries, including healthcar",
+   "country": "US"
+  },
+  {
+   "victim": "Quaker State Mexico",
+   "group": "qilin",
+   "published": "2026-08-21",
+   "domain": "www.quakerstate.com.mx",
+   "claim": "N/A",
+   "country": "MX"
+  },
+  {
+   "victim": "iPic",
+   "group": "qilin",
+   "published": "2026-08-21",
+   "domain": "www.ipic.com",
+   "claim": "N/A",
+   "country": "US"
+  },
+  {
+   "victim": "Cinépolis",
+   "group": "qilin",
+   "published": "2026-08-21",
+   "domain": "www.cinepolis.com",
+   "claim": "N/A",
+   "country": "MX"
+  },
+  {
+   "victim": "Fairview Dental Group",
+   "group": "rhysida",
+   "published": "2026-08-21",
+   "domain": "",
+   "claim": "Fairview Dental Group Fairview Dental Group offers a range of dental services including family dentistry, cosmetic treatments, dental implants, and invisible braces.We are pleased to present:Full patient database, patient X-rays, scanned forms/consents/invoices, health records (PHI) of the entire practice, unencrypted.    More",
+   "country": "US"
+  },
+  {
+   "victim": "Gindre India",
+   "group": "qilin",
+   "published": "2026-08-21",
+   "domain": "www.gindre.com",
+   "claim": "N/A",
+   "country": "IN"
+  },
+  {
+   "victim": "Battle Creek Public Schools",
+   "group": "rhysida",
+   "published": "2026-08-21",
+   "domain": "battlecreekschools.net",
+   "claim": "Battle Creek Public Schools Battle Creek Public Schools in Nebraska provides educational services for students from pre-kindergarten through 12th grade. We are pleased to present:Student records of named minors:**  IEP/special-ed files, disability determination notices, discipline/suspension records.Federal funds compliance trail (ESSA/Title I application), staff health-spending claims (payflex/EH",
+   "country": "US"
+  },
+  {
+   "victim": "The Pendas Law Firm",
+   "group": "qilin",
+   "published": "2026-08-21",
+   "domain": "www.pendaslaw.com",
+   "claim": "N/A",
+   "country": "US"
+  },
+  {
+   "victim": "Blake Services",
+   "group": "qilin",
+   "published": "2026-08-21",
+   "domain": "www.blakeservices.us",
+   "claim": "N/A",
+   "country": "US"
+  },
+  {
+   "victim": "Professional",
+   "group": "qilin",
+   "published": "2026-08-21",
+   "domain": "www.wwccpa.com",
+   "claim": "N/A",
+   "country": "US"
+  },
+  {
+   "victim": "Volktek",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "volktek.com",
+   "claim": "volktek.com zoominfo.com/c/volktek-corp/161873991 Volktek is a leading Taiwanese manufacturer established in 1994, specializing in high-performance industrial networking and Ethernet solutions.\nThey design and produce a wide range of robust equipment, including industrial Ethernet switches, PoE devices, and fiber optic converters.\nWith in-house production facilities, the company provides reliable ",
+   "country": "SG"
+  },
+  {
+   "victim": "Layher",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "layher.cl",
+   "claim": "layher.cl zoominfo.com/c/layher-del-pacífico-sa--layher-chile/1319092699 Layher Chile is the local branch of the globally renowned German manufacturer specializing in scaffolding and access systems.\nThey supply high-quality scaffolding solutions, safety equipment, and event structures for the construction, industrial, and infrastructure sectors.\nThe company provides comprehensive services, includ",
+   "country": "CL"
+  },
+  {
+   "victim": "Espac",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "espac.cl",
+   "claim": "espac.cl zoominfo.com/c/espac/425816287 ESPAC Construcción is a leading Chilean company based in Santiago that manufactures and distributes specialized products for the building industry.\nThey produce high-quality construction materials, including steel shores, heavy-duty pallets, scaffolding systems, and material handling carts.\nAdditionally, the firm offers comprehensive rental services for form",
+   "country": "CL"
+  },
+  {
+   "victim": "Gould Sherwood Consulting",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "gouldsherwood.com",
+   "claim": "gouldsherwood.com zoominfo.com/c/gould-sherwood-consulting-llc/347553210 Gould-Sherwood Consulting is a boutique IT support and services firm based in Lexington, Massachusetts, serving the Greater Boston area since 2005.\nThey specialize in comprehensive computer and network support, including planning, maintenance, and troubleshooting for both Mac and PC environments.\nThe company primarily caters ",
+   "country": "US"
+  },
+  {
+   "victim": "Eyecare Center of Snohomish",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "eyecarecenterofsnohomish.com",
+   "claim": "eyecarecenterofsnohomish.com zoominfo.com/c/eyecare-center-of-snohomish/442336650 Eyecare Center of Snohomish is a trusted optometry clinic in Snohomish, Washington, proudly serving its community since 1964.\nThey offer comprehensive vision and medical eye exams, diagnosing and treating various eye diseases to ensure long-term ocular health.\nThe clinic also features a full-service optical boutique ",
+   "country": "US"
+  },
+  {
+   "victim": "AGS Cinemas",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "agscinemas.com",
+   "claim": "agscinemas.com zoominfo.com/c/ags-cinemas-private-ltd/356074293 AGS Cinemas is a prominent multiplex chain and film exhibition company based in Chennai, India, operating under the AGS Entertainment brand.\nThe theaters feature state-of-the-art technical facilities, including Dolby Atmos sound systems and 4K projection for a premium viewing experience.\nTheir official platform allows customers to eas",
+   "country": "IN"
+  },
+  {
+   "victim": "Ariel Energia",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "arielenergia.it",
+   "claim": "arielenergia.it zoominfo.com/c/gdl-spa/1311974459 Ariel Energia is a prominent Italian company based in Turin with over 40 years of experience in the home energy and comfort sector.\nThey specialize in producing and distributing \"Made in Italy\" heating and cooling solutions, including pellet stoves, boilers, and air conditioners.\nThe company also provides renewable energy systems like photovoltaics",
+   "country": "IT"
+  },
+  {
+   "victim": "Oceanica Internacional",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "oceanica.ws",
+   "claim": "oceanica.ws Oceanica Internacional is a comprehensive logistics and freight forwarding company operating across Central America.\nThey serve as a strategic logistics partner, providing international trade and supply chain solutions in countries like Costa Rica, Panama, and Guatemala.\nThe company specializes in coordinating imports, exports, and cargo transportation to support businesses throughout ",
+   "country": "WS"
+  },
+  {
+   "victim": "CAZ Investments",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "cazinvestments.com",
+   "claim": "cazinvestments.com zoominfo.com/c/caz-investments-lp/16765398 CAZ Investments We have taken NDA files, HR data, user data, employee data, models, bank statements, tax and legal documents, confidential files, photos of your work and leisure time, screenshots, information about interactions with offshore accounts, your and your clients' dirty laundry, passport scans, VIP client data, and much more t",
+   "country": "BZ"
+  },
+  {
+   "victim": "Aquasea",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "aquasea.com",
+   "claim": "aquasea.com rocketreach.co/aquasea-inc-profile_b468216cfc5c9f6e Aquasea Inc. is a clothing and apparel manufacturing company headquartered in Compton, California, operating since 1995.\nThe business specializes in full-package production, including cut and sew services, private label manufacturing, and screen printing.\nThey also operate nearshore textile manufacturing facilities to support their co",
+   "country": "NO"
+  },
+  {
+   "victim": "ARBEITERKAMMERN",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "arbeiterkammer.at",
+   "claim": "arbeiterkammer.at The Austrian Chamber of Labour is a statutory public organization dedicated to representing the interests of employees and consumers across Austria.\nIt provides its members with free legal advice on labor and social law, educational support, and strong consumer protection services.\nThe organization actively advocates for workers' rights, fair wages, and social justice through ext",
+   "country": "AT"
+  },
+  {
+   "victim": "Geb Sas",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "geb.fr",
+   "claim": "geb.fr zoominfo.com/c/geb-sas/372743980 GEB SAS is a historic French chemical manufacturing company established in 1860.\nThey specialize in formulating and producing essential sealing solutions, adhesives, and PVC glues.\nThe family-owned business primarily provides high-quality maintenance and installation products for plumbing and heating professionals.",
+   "country": "FR"
+  },
+  {
+   "victim": "Almeer",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "al-meergroup.com",
+   "claim": "al-meergroup.com  zoominfo.com/c/almeer/1326290906 Almeer General Contracting Establishment is a Saudi-owned company established in 2010 and headquartered in Jubail, Saudi Arabia.\nThey specialize in comprehensive electrical, civil construction, and mechanical erection services for industrial facilities.\nThe firm primarily serves large-scale sectors, including oil refineries and fertilizer plants, ",
+   "country": "AE"
+  },
+  {
+   "victim": "ESCON Group",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "escon.us",
+   "claim": "escon.us zoominfo.com/c/escon-group/352605618 ESCON Group is a veteran-owned electrical contracting company based in Bay City, Michigan, with a history tracing back to 1907.\nThey specialize in providing comprehensive commercial and residential electrical services, low voltage solutions, and fiber optics.\nThe company also offers advanced security systems, smart integrations, and robust commercial g",
+   "country": "US"
+  },
+  {
+   "victim": "Akatake Engineering",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "akatake.co.jp",
+   "claim": "akatake.co.jp crunchbase.com/organization/akatake-engineering-co-ltd Akatake Engineering Co., Ltd. is a Japanese manufacturing company based in Numazu, Shizuoka, established in 1971.\nThey specialize in powder handling technology, providing comprehensive solutions for the storage, feeding, weighing, and transportation of bulk powders.\nThe company designs and manufactures custom industrial equipment",
+   "country": "JP"
+  },
+  {
+   "victim": "Magdalena Grand Beach Golf Resort",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "magdalenagrand.com",
+   "claim": "magdalenagrand.com zoominfo.com/c/magdalena-grand-beach--golf-resort/348187300 Magdalena Grand Beach & Golf Resort is a luxury hotel and resort located in Lowlands on the beautiful island of Tobago.\nIt features premium oceanfront accommodations with access to a championship golf course, spa, pools, and tennis courts.\nThe property is also a popular destination for weddings, offering guests a variet",
+   "country": "MX"
+  },
+  {
+   "victim": "LOG Systems",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "logsystem.pl",
+   "claim": "logsystem.pl zoominfo.com/c/log-systems/372786485 LOG Systems is a Polish software company based in Wrocław that develops comprehensive IT management and Helpdesk solutions.\nTheir flagship product, LOG Plus, is an advanced ITSM platform designed to streamline ticketing, incident management, and IT infrastructure monitoring.\nThe software also includes powerful Software Asset Management features to ",
+   "country": "PL"
+  },
+  {
+   "victim": "Lexacaucho",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "lexacaucho.com",
+   "claim": "lexacaucho.com zoominfo.com/c/lexacaucho--laminados-y-extruidos-de-caucho-sac/457170004  Lexacaucho is a Peruvian manufacturing company based in Lima with over 25 years of experience in the rubber and polymer industry.\nThey specialize in producing molded rubber sheets, profiles, linings, and custom parts using materials like natural rubber, SBR, and EPDM.\nThe company primarily serves the mining, f",
+   "country": ""
+  },
+  {
+   "victim": "AWJ Holding",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "awjholding.com",
+   "claim": "awjholding.com zoominfo.com/c/awj-holding-co/448239448 AWJ Holding Company is a prominent Saudi-based single-family office and investment firm established in 2016.\nHeadquartered in Riyadh, the company specializes in real estate development, property management, and strategic investment management.\nIt focuses on high-impact developments and operates dynamic subsidiaries across retail, hospitality, ",
+   "country": "AE"
+  },
+  {
+   "victim": "dlp motive",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "dlp-motive.de",
+   "claim": "dlp-motive.de dlp motive is a German full-service event technology provider founded in 2007, successfully realizing around 600 projects annually.\nThey offer comprehensive technical solutions including lighting, audio, video, kinetics, and rigging for corporate, e-sports, and public events.\nThe company handles the entire event lifecycle, providing everything from initial concept and design to logis",
+   "country": "DE"
+  },
+  {
+   "victim": "UOLconsult",
+   "group": "thegentlemen",
+   "published": "2026-08-21",
+   "domain": "uol-consult.com",
+   "claim": "uol-consult.com UOLconsult GmbH is a boutique management consulting firm based in Vienna, Austria, founded in 2015.\nThey specialize in strategic management, business development, and investment consulting.",
+   "country": "BR"
+  },
+  {
+   "victim": "Hogan Omidi P.C.",
+   "group": "dragonforce",
+   "published": "2026-08-21",
+   "domain": "hoganomidi.com",
+   "claim": "Hogan Omidi, P.C. is a boutique law firm specializing in family law, including divorce, child custody, and property division, with a focus on high-asset cases. The firm is led by experienced attorneys who have authored key reference materials on Colorado family law, providing them with a unique advantage in legal representation. They serve a diverse clientele, including executives, business owners",
+   "country": "US"
+  },
+  {
+   "victim": "Interim HealthCare [Head office]",
+   "group": "anubis",
+   "published": "2026-08-21",
+   "domain": "interimhealthcare.com",
+   "claim": "Data breach at a major healthcare franchise headquarters.",
+   "country": "US"
+  },
+  {
+   "victim": "Studee",
+   "group": "direwolf",
+   "published": "2026-08-21",
+   "domain": "studee.com",
+   "claim": "[AI generated] Studee is an online platform that helps international students find and apply to universities around the world. Operating in the education technology industry, the company is based in the United Kingdom. It connects prospective students with hundreds of universities globally, offering guidance on courses, applications, and admissions processes, making higher education more accessibl",
+   "country": ""
+  },
+  {
+   "victim": "Reviso Cloud Accounting Limited",
+   "group": "direwolf",
+   "published": "2026-08-21",
+   "domain": "reviso.com",
+   "claim": "[AI generated] Reviso Cloud Accounting Limited is a software company that provides cloud-based accounting solutions primarily targeting small and medium-sized businesses. The platform offers tools for bookkeeping, invoicing, financial reporting, and VAT management. The company operates within the financial technology and accounting software industry and is based in the United Kingdom, serving busi",
+   "country": "DK"
+  },
+  {
+   "victim": "MCT Group of Companies",
+   "group": "direwolf",
+   "published": "2026-08-21",
+   "domain": "mctuae.com",
+   "claim": "Building Materials",
+   "country": "AE"
+  },
+  {
+   "victim": "HP Carriers",
+   "group": "direwolf",
+   "published": "2026-08-21",
+   "domain": "hpcarriers.com",
+   "claim": "[AI generated] N/A",
+   "country": "US"
+  },
+  {
+   "victim": "Allstar Industries",
+   "group": "direwolf",
+   "published": "2026-08-21",
+   "domain": "allstarindustries.com",
+   "claim": "Business Services",
+   "country": "US"
+  },
+  {
+   "victim": "Deer Creek-Mackinaw CUSD",
+   "group": "direwolf",
+   "published": "2026-08-21",
+   "domain": "deemack.org",
+   "claim": "Education",
+   "country": "US"
+  },
+  {
+   "victim": "iSON XPERIENCES",
+   "group": "direwolf",
+   "published": "2026-08-21",
+   "domain": "isonxperiences.com",
+   "claim": "Business Services",
+   "country": "MX"
+  },
+  {
+   "victim": "Diaco Global",
+   "group": "direwolf",
+   "published": "2026-08-21",
+   "domain": "diacoglobal.com",
+   "claim": "Jewelry &amp; Watch Retail",
+   "country": ""
+  },
+  {
+   "victim": "Authenticate Information Systems",
+   "group": "direwolf",
+   "published": "2026-08-21",
+   "domain": "authenticateis.com",
+   "claim": "[AI generated] N/A",
+   "country": "US"
+  },
+  {
+   "victim": "ProSim Aviation Research",
+   "group": "direwolf",
+   "published": "2026-08-21",
+   "domain": "prosim.aero",
+   "claim": "Engineering Software",
+   "country": "NL"
+  },
+  {
+   "victim": "The Revel Collective",
+   "group": "direwolf",
+   "published": "2026-08-21",
+   "domain": "therevelcollective.com",
+   "claim": "Hospitality",
+   "country": "US"
+  },
+  {
+   "victim": "Aztec Software",
+   "group": "direwolf",
+   "published": "2026-08-21",
+   "domain": "aztecsoftware.com",
+   "claim": "Engineering Software",
+   "country": "MX"
+  },
+  {
+   "victim": "NorthStar",
+   "group": "direwolf",
+   "published": "2026-08-21",
+   "domain": "cbsnorthstar.com",
+   "claim": "Enterprise Resource Planning",
+   "country": "CA"
+  },
+  {
+   "victim": "Crystal Pharmatech",
+   "group": "Eclipse",
+   "published": "2026-08-21",
+   "domain": "www.crystalpharmatech.com",
+   "claim": "Crystal Pharmatech is a technology-driven contract research organization (CRO) that focuses on materials science and engineering for drug development. Established in 2010 and have R&D centers located in Suzhou (China), New Jersey, San Francisco (USA), and Toronto (Canada). Also its key differentiator is integrated and specialized services, including API solid-state research, crystallization, prefo",
+   "country": "US"
+  },
+  {
+   "victim": "Nteitalia",
+   "group": "Panzer",
+   "published": "2026-08-21",
+   "domain": "nteitalia.it",
+   "claim": "NTE Italia, an engineering and telecommunications service provider based in Catanzaro, Italy. Sensitive thousands of documents are compromised.",
+   "country": "IT"
+  },
+  {
+   "victim": "JC Sales",
+   "group": "akira",
+   "published": "2026-08-21",
+   "domain": "jcsalesweb.com",
+   "claim": "JC Sales is a leading full-service wholesaler based in Los Angeles, California, specializing in\na vast array of wholesale products including health and beauty items, food and beverages, gene\nral merchandise, and seasonal items.\n\nWe will upload 206gb of corporate data soon. Detailed personal employee information (passports,\nDLs, addresses, phones, contacts), confidential financials, contracts and a",
+   "country": "US"
+  },
+  {
+   "victim": "D...",
+   "group": "SilentRansomGroup",
+   "published": "2026-08-20",
+   "domain": "",
+   "claim": "Redacted entry - full company name pending disclosure (FULL DATA TIMER active).",
+   "country": ""
+  },
+  {
+   "victim": "regencycenters",
+   "group": "iah6477",
+   "published": "2026-08-20",
+   "domain": "regencycenters.com",
+   "claim": "Size: 219.5 GiB",
+   "country": "US"
+  },
+  {
+   "victim": "acima",
+   "group": "iah6477",
+   "published": "2026-08-20",
+   "domain": "acima.com",
+   "claim": "Size: 2.1 TiB",
+   "country": "US"
+  },
+  {
+   "victim": "marvin",
+   "group": "iah6477",
+   "published": "2026-08-20",
+   "domain": "",
+   "claim": "Size: 2.2 TiB",
+   "country": ""
+  },
+  {
+   "victim": "Be Media",
+   "group": "play",
+   "published": "2026-08-20",
+   "domain": "www.bemedia.com",
+   "claim": "United States",
+   "country": "US"
+  }
+ ]
+}

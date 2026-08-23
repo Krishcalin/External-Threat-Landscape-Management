@@ -160,8 +160,21 @@ OPERATIONS: Dict[str, Exposure] = {
     # FR-GOV-003: reading a public index page is passive collection; presenting
     # credentials to get past a login is participation, and it is not something
     # this product does.
+    #
+    # `leak_index_read` is the PERMITTED half, placed here rather than beside
+    # the other passive reads so the line FR-GOV-003 draws is visible at a
+    # glance. A ransomware group's victim index is a public page and reading it
+    # is observation. Everything past it — the negotiation portal, the sample
+    # archive, the forum behind a login — is on the lines around it.
+    "leak_index_read": Exposure.PASSIVE,
     "forum_authenticate": Exposure.PROHIBITED,
     "forum_transact": Exposure.PROHIBITED,
+    # Fetching what a group published ABOUT a victim. Prohibited despite being
+    # technically a public download: the material is stolen, it routinely
+    # contains personal data belonging to people who are not this product's
+    # customers, and no question SKOPOS answers requires possessing it. Knowing
+    # a victim was listed is the finding; the archive is not.
+    "leak_data_download": Exposure.PROHIBITED,
     # FR-GOV-007: deception assets are sensors. Nothing here attacks anything.
     "exploit_attempt": Exposure.PROHIBITED,
     "credential_replay": Exposure.PROHIBITED,

@@ -1,4 +1,4 @@
-import type { Accuracy, AlertsView, CertInStatus, CiiRegister,
+import type { RuleCatalogue, RefusalRegister, Accuracy, AlertsView, CertInStatus, CiiRegister,
               ControlMapping, CrosshairView, DnsRunsPage, FindingsPage,
               ChangesView, IntelStatus, LatencyReport, RunsPage, Summary,
               BreachReport, ExposureGraph, LookalikeReport,
@@ -143,3 +143,8 @@ export const secretsScanning = () =>
 /** The exposure graph. Read-only: it draws what the last scan already computed
  *  and triggers no collection of its own. */
 export const exposureGraph = () => get<ExposureGraph>('/graph?limit=300')
+
+/** The rule catalogue and the refusal register. Both are public endpoints —
+ *  they describe the software, not any estate. */
+export const ruleCatalogue = () => get<RuleCatalogue>('/rules')
+export const refusalRegister = () => get<RefusalRegister>('/refusals')

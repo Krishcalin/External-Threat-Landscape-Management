@@ -668,3 +668,51 @@ export interface ExposureGraph {
   truncated: boolean
   beyond_catalogue: { advisories: number; note: string }
 }
+
+/* ── the rule catalogue and the refusal register (P8 W1, W8) ───────────── */
+
+export interface CatalogueRule {
+  id: string
+  title: string
+  category: string
+  /** Never a number. A number invites summation, and a sum of forty rules is
+   *  the scalar the catalogue exists to avoid. */
+  severity: 'act' | 'check' | 'context' | 'coverage'
+  detects: string
+  /** What firing does NOT establish. Required, never empty, and rendered with
+   *  the same weight as `detects`. */
+  limits: string
+  emitted_by: string
+  evidence: string[]
+  needs: string | null
+}
+
+export interface RuleCatalogue {
+  rules: CatalogueRule[]
+  count: number
+  by_category: Record<string, CatalogueRule[]>
+  severities: Record<string, string>
+  note: string
+}
+
+export interface Refusal {
+  id: string
+  title: string
+  ground: 'measured' | 'governance' | 'capability' | 'authority' | 'honesty'
+  /** What a competitor sells here — named so the reader knows it was
+   *  considered rather than overlooked. */
+  sold_elsewhere: string
+  because: string
+  recorded_in: string
+}
+
+export interface RefusalRegister {
+  refusals: Refusal[]
+  count: number
+  by_ground: Record<string, number>
+  /** The OTHER kind: absent because unbuilt, not because declined. Never
+   *  merged with the refusals. */
+  gaps: string[]
+  note: string
+  document: string
+}

@@ -180,6 +180,27 @@ BUNDLE_CAVEAT = (
 )
 
 
+def _provenance_note() -> str:
+    """The refusals and the accuracy record, as one outbound note.
+
+    Built at call time from `core.refusals` and `core.backtest` so it cannot
+    drift from what the product actually declines and actually scored.
+    """
+    from core import refusals as _refusals
+
+    lines = ["THIS PRODUCER'S STATED REFUSALS. Each is a capability a "
+             "competitor sells, absent here for a recorded reason — most of "
+             "them a measurement this project made and had to accept:"]
+    lines.extend(f"  - {line}" for line in _refusals.caveat_lines())
+    lines.append("")
+    lines.append(
+        "ACCURACY. This producer publishes its own forecast track record "
+        "(core/backtest.py): no skill score below 30 resolved forecasts, and "
+        "lead time reported as structurally unmeasurable rather than "
+        "estimated. Weigh this data accordingly.")
+    return "\n".join(lines)
+
+
 def bundle(findings: Iterable[Dict[str, Any]],
            created: Optional[str] = None) -> Dict[str, Any]:
     """A STIX 2.1 bundle. Deterministic, so re-exporting deduplicates."""
@@ -208,9 +229,15 @@ def bundle(findings: Iterable[Dict[str, Any]],
         objects.append(relationship(finding, stamp))
 
     if objects:
-        objects.append(note(BUNDLE_CAVEAT,
-                            [o["id"] for o in objects
-                             if o["type"] == "relationship"][:200], stamp))
+        relationship_ids = [o["id"] for o in objects
+                            if o["type"] == "relationship"][:200]
+        objects.append(note(BUNDLE_CAVEAT, relationship_ids, stamp))
+        # What this producer will NOT tell you, and its own track record.
+        # A consumer receiving intelligence with no stated limits assumes an
+        # absence is an oversight, and one with no accuracy record has no way
+        # to weigh it. Both travel with the data rather than living in a
+        # document nobody downloads.
+        objects.append(note(_provenance_note(), relationship_ids, stamp))
 
     return {
         "type": "bundle",

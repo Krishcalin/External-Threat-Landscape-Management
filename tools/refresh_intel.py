@@ -505,6 +505,25 @@ def _parse_feed(feed, raw: str) -> List[str]:
     return sorted(out)
 
 
+def fetch_leaksites() -> Dict:
+    """Vendor the ransomware leak-site victim index.
+
+    Reads a PUBLIC AGGREGATOR, never a hidden service — see
+    collect/leaksites.py for why, and core/gate.py for the operation that is
+    permitted (`leak_index_read`) beside the two that are not.
+    """
+    from collect import leaksites
+
+    raw = _get(leaksites.SOURCE_URL).decode("utf-8", "replace")
+    payload = leaksites.shape(raw)
+    listings = payload["listings"]
+    groups = {l["group"] for l in listings}
+    with_domain = sum(1 for l in listings if l.get("domain"))
+    print(f"  {len(listings):,} listings from {len(groups)} group(s); "
+          f"{with_domain:,} carry a domain")
+    return payload
+
+
 def write(path: Path, payload: Dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
@@ -588,6 +607,9 @@ def main(argv=None) -> int:
                              "--only-artefacts exists")
     parser.add_argument("--skip-blocklists", action="store_true",
                         help="do not refresh data/blocklists.json")
+    parser.add_argument("--only-leaksites", action="store_true",
+                        help="refresh ONLY data/leaksites.json — the public "
+                             "ransomware leak-site victim index")
     parser.add_argument("--check", action="store_true",
                         help="report whether the vendored copy is current "
                              "without writing anything")
@@ -599,6 +621,11 @@ def main(argv=None) -> int:
     if args.only_blocklists:
         print("Fetching keyless abuse feeds…")
         write(DATA / "blocklists.json", fetch_blocklists())
+        return 0
+
+    if args.only_leaksites:
+        print("Fetching the public leak-site victim index…")
+        write(DATA / "leaksites.json", fetch_leaksites())
         return 0
 
     print("Fetching CISA KEV…")

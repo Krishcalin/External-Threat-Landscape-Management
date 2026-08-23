@@ -52,7 +52,12 @@ from core.store import StoreUnavailable
 #: credential is wrong.
 PUBLIC_PREFIXES = ("/api/v1/health", "/api/v1/auth/", "/assets/", "/taxii2/")
 PUBLIC_EXACT = ("/", "/favicon.png", "/skopos-logo.png", "/api/docs",
-                "/api/openapi.json")
+                "/api/openapi.json",
+                # The rule catalogue describes the SOFTWARE, not any estate: no
+                # finding, no asset, nothing about a tenant. Public so somebody
+                # evaluating SKOPOS can read what it checks before installing
+                # it, which is the whole point of publishing one.
+                "/api/v1/rules", "/api/v1/refusals")
 
 #: The only API paths a user who must change their password may reach.
 #:

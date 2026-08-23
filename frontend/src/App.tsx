@@ -16,6 +16,7 @@ import type { Accuracy, AlertsView, CertInStatus, CiiRegister, ControlMapping,
 import { logout } from './api/auth'
 import { AccountPanel } from './components/AccountPanel'
 import { AccuracyPanel } from './components/AccuracyPanel'
+import { RulesPanel } from './components/RulesPanel'
 import { BrandPanel } from './components/BrandPanel'
 import { ExecutivePanel } from './components/ExecutivePanel'
 import { GraphPanel } from './components/GraphPanel'
@@ -53,7 +54,7 @@ import { TepsBar } from './components/TepsBar'
 
 type Section = 'worklist' | 'operations' | 'executive' | 'crosshair'
   | 'graph' | 'lookup' | 'brand' | 'suppliers' | 'compliance'
-  | 'accuracy' | 'alerts' | 'system' | 'account'
+  | 'accuracy' | 'alerts' | 'system' | 'account' | 'rules'
 
 /** Worklist first because it is what somebody opens the console to do; System
  *  last because it answers a question asked once per deployment. */
@@ -73,6 +74,10 @@ const SECTIONS: { id: Section; label: string }[] = [
   { id: 'alerts', label: 'Alerts' },
   { id: 'compliance', label: 'Compliance' },
   { id: 'accuracy', label: 'Accuracy' },
+  // What the product checks and what it refuses to claim. Beside Accuracy
+  // because all three answer "how much should I believe this" rather than
+  // "what is wrong with my estate".
+  { id: 'rules', label: 'Rules' },
   { id: 'system', label: 'This instance' },
   // Beside "This instance" because both answer questions about the deployment
   // rather than about the estate, and last because neither is why anybody
@@ -386,6 +391,8 @@ export function App({ session = null }: { session?: Session | null }) {
         )}
 
         {section === 'accuracy' && <AccuracyPanel accuracy={accuracy} />}
+
+        {section === 'rules' && <RulesPanel />}
 
         {section === 'account' && session && <AccountPanel session={session} />}
 

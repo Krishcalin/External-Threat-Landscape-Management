@@ -107,6 +107,11 @@ ALLOWED_HTTP_HOSTS: frozenset = frozenset({
     # this list it is merely reachable; `acknowledged()` decides whether it is
     # ever called.
     "internetdb.shodan.io",
+    # The ransomware leak-site AGGREGATOR — a public index of what groups
+    # published themselves. Reachable so `leak_index_read` can run; note that
+    # no .onion host appears here and none ever will, because this product does
+    # not open circuits to criminal infrastructure.
+    "api.ransomware.live",
 })
 
 #: Third-party recursive resolvers. Not the customer's.
