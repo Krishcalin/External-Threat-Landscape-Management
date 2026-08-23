@@ -191,13 +191,17 @@ def run_scan(inventory_path: str = Query(..., description="CSV or JSON asset inv
                 # evaluator was written because nothing supplied ranges.
                 affected_versions=corpus.version_ranges_for(
                     correspondence.exploited.cve),
+                ssvc=corpus.ssvc_for(correspondence.exploited.cve),
                 adversary=adversary,
                 asset_tier=asset_tier,
                 days_exposed=days_exposed,
                 shadow=asset.identifier not in declared,
             ))
 
-    ranked = engine.rank(findings)
+    ranked = engine.rank(
+        findings,
+        automatable={e.cve: corpus.automatable(e.cve)
+                     for e in catalogue})
     unmatched = len(match.unmatched_assets(assets, [f for f in findings]))
     summary_payload = engine.summarise(ranked, unmatched=unmatched,
                                        unmappable=len(unmappable))

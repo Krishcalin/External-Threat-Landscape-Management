@@ -203,25 +203,45 @@ def match(assets: Iterable[Asset],
     return rank(out)
 
 
-def rank(exposures: List[Exposure]) -> List[Exposure]:
+def rank(exposures: List[Exposure],
+         automatable: Optional[Dict[str, Optional[bool]]] = None) -> List[Exposure]:
     """Order for a human working the list top-down.
 
     WHY THIS ORDER. Ransomware use first, because it is the one attribute that
     changes what a breach costs rather than how likely it is. Then the CISA due
     date, which is a real deadline for federal agencies and a good proxy for
-    urgency for everybody else. Then EPSS, which orders within a tie. Confidence
-    last: a STRONG match is worth reading before a PARTIAL one, but it should
-    never outrank an actual ransomware entry.
+    urgency for everybody else. Then SSVC `automatable`, then EPSS, then
+    confidence — a STRONG match is worth reading before a PARTIAL one, but it
+    should never outrank an actual ransomware entry.
+
+    WHY AUTOMATABLE SITS ABOVE EPSS. It is an OBSERVATION and EPSS is a
+    FORECAST. CISA has decided that mass exploitation of this vulnerability is
+    feasible without human effort; EPSS predicts that exploitation will happen.
+    This product puts observations ahead of predictions everywhere else, and the
+    worklist order is where that preference actually costs something.
+
+    It does NOT feed the exploitability factor, and that is deliberate rather
+    than an oversight: KEV membership already short-circuits exploitability to
+    1.0, so an SSVC input there would be silently discarded for every entry in
+    this corpus. Measured before it was wired anywhere.
+
+    UNKNOWN IS NOT "NO". A CVE CISA has not assessed sorts between automatable
+    and not-automatable, because pushing the unassessed to the bottom would hide
+    them behind a decision nobody made.
 
     Deliberately NOT a composite score. A single number would need weights, the
     weights would be tuned until the top of the list looked right, and the tuning
     would become the product's real opinion where nobody could inspect it.
     """
+    decisions = automatable or {}
+
     def key(exposure: Exposure) -> Tuple:
         entry = exposure.exploited
+        auto = decisions.get(entry.cve)
         return (
             0 if entry.known_ransomware else 1,
             entry.due_date or entry.date_added,
+            0 if auto is True else (1 if auto is None else 2),
             -(entry.epss or 0.0),
             0 if exposure.confidence is Confidence.STRONG else 1,
             entry.cve,

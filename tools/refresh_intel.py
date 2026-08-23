@@ -164,6 +164,11 @@ def fetch_affected(cves: Iterable[str], interval: float = CVE_INTERVAL) -> Dict:
     """
     wanted = [str(c).strip().upper() for c in cves if str(c).strip()]
     records: Dict[str, list] = {}
+    # SSVC comes out of the SAME response as the affected ranges — the CISA-ADP
+    # container of the very record already being fetched — so it costs no extra
+    # request. Extracting it here rather than in a second pass is the whole
+    # reason this function returns two things.
+    ssvc: Dict[str, dict] = {}
     counts = {"structured": 0, "exact": 0, "uncomparable": 0, "unavailable": 0}
     failures: list = []
 
@@ -180,6 +185,10 @@ def fetch_affected(cves: Iterable[str], interval: float = CVE_INTERVAL) -> Dict:
             counts["unavailable"] += 1
             failures.append({"cve": cve, "reason": type(exc).__name__})
             continue
+
+        decision = _ssvc_from(record)
+        if decision:
+            ssvc[cve] = decision
 
         products = affected_products(record)
         kept = []
@@ -224,7 +233,35 @@ def fetch_affected(cves: Iterable[str], interval: float = CVE_INTERVAL) -> Dict:
                                      / max(1, reached), 4)),
         "failures": failures[:50],
         "affected": records,
+        "ssvc": ssvc,
     }
+
+
+def _ssvc_from(record: Dict) -> Dict:
+    """CISA's SSVC decision points, from the ADP container.
+
+    Only the CISA-ADP provider is read. SSVC is a DECISION made by a
+    coordinator, and taking one from an arbitrary enricher would attribute
+    somebody else's judgement to CISA.
+    """
+    for container in (record.get("containers") or {}).get("adp") or []:
+        provider = (container.get("providerMetadata") or {}).get("shortName")
+        if provider != "CISA-ADP":
+            continue
+        for metric in container.get("metrics") or []:
+            other = metric.get("other") or {}
+            if other.get("type") != "ssvc":
+                continue
+            content = other.get("content") or {}
+            flat = {}
+            for option in content.get("options") or []:
+                for key, value in option.items():
+                    flat[str(key).strip().lower().replace(" ", "_")] = str(value)
+            if flat:
+                flat["timestamp"] = str(content.get("timestamp") or "")[:10]
+                return flat
+    return {}
+
 
 
 def _is_usable_version(entry: Dict) -> bool:
@@ -439,6 +476,28 @@ def main(argv=None) -> int:
             },
             "failures": affected["failures"],
             "affected": affected["affected"],
+        })
+        decisions = affected.get("ssvc") or {}
+        automatable = sum(1 for d in decisions.values()
+                          if d.get("automatable") == "yes")
+        print(f"  SSVC decision points for {len(decisions):,} CVE(s); "
+              f"{automatable:,} automatable")
+        write(DATA / "ssvc.json", {
+            "_meta": {
+                "source": "CVE Program, CISA-ADP container",
+                "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "scope": "KEV subset",
+                "count": len(decisions),
+                "automatable": automatable,
+                "note": "SSVC is CISA's own decision record. `exploitation` is "
+                        "an OBSERVATION and `automatable` says whether mass "
+                        "exploitation is feasible without human effort. "
+                        "Automatable does NOT change the exploitability factor "
+                        "for a KEV entry — KEV membership already short-circuits "
+                        "that to 1.0 — so it is used where it can actually "
+                        "matter: the order the worklist is worked in.",
+            },
+            "ssvc": decisions,
         })
 
     if not args.skip_artefacts:

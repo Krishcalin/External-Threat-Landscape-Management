@@ -193,6 +193,7 @@ def score_exposure(exposure: Exposure,
                    cloud: Optional[CloudAsset] = None,
                    external_reachable: Optional[bool] = None,
                    affected_versions: Optional[Sequence[Dict[str, Any]]] = None,
+                   ssvc: Optional[Dict[str, Any]] = None,
                    adversary: Optional[scoring.AdversaryInterest] = None,
                    asset_tier: Optional[int] = None,
                    days_exposed: int = 0,
@@ -240,6 +241,15 @@ def score_exposure(exposure: Exposure,
                 "published affected ranges could not be compared against this "
                 + (f"version ({asset.version})" if asset.version
                    else "asset, which carries no version"))
+
+    if ssvc:
+        # Shown, not merely used. "CISA judged this automatable" is a fact an
+        # operator can act on — it means everything vulnerable gets found by a
+        # scanner, not by somebody choosing to look at you.
+        parts = [f"{k.replace('_', ' ')}={v}" for k, v in sorted(ssvc.items())
+                 if k != "timestamp"]
+        if parts:
+            evidence.append("CISA SSVC: " + ", ".join(parts))
 
     exposure_factors, notes = build_exposure_factors(
         asset, cloud, external_reachable, days_exposed, shadow)
@@ -289,17 +299,33 @@ def score_exposure(exposure: Exposure,
                    reconciliation=reconciliation)
 
 
-def rank(findings: Iterable[Finding]) -> List[Finding]:
-    """TEPS descending, then ransomware, then CVE for a stable order.
+def rank(findings: Iterable[Finding],
+         automatable: Optional[Dict[str, Optional[bool]]] = None) -> List[Finding]:
+    """TEPS descending, then ransomware, then SSVC automatable, then CVE.
 
     A stable tiebreak matters more than it looks: without it the same scan
     renders in a different order each run and a reader cannot tell whether
     anything actually changed.
+
+    `automatable` breaks ties WITHIN a score. CISA has decided that mass
+    exploitation of the vulnerability is feasible without human effort, which is
+    an observation about how fast everything vulnerable gets hit — a different
+    question from how bad it is, and the right one for ordering two findings the
+    model scores identically.
+
+    UNKNOWN sorts between yes and no, because a CVE nobody has assessed must not
+    be pushed to the bottom behind a decision that was never made.
     """
-    return sorted(findings,
-                  key=lambda f: (-f.score.teps,
-                                 0 if f.exploited.known_ransomware else 1,
-                                 f.exploited.cve))
+    decisions = automatable or {}
+
+    def key(finding: Finding) -> Tuple:
+        auto = decisions.get(finding.exploited.cve)
+        return (-finding.score.teps,
+                0 if finding.exploited.known_ransomware else 1,
+                0 if auto is True else (1 if auto is None else 2),
+                finding.exploited.cve)
+
+    return sorted(findings, key=key)
 
 
 def _is_retired(finding) -> bool:

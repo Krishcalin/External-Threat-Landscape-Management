@@ -59,10 +59,12 @@ class Corpus:
     """
 
     def __init__(self, kev: Dict[str, Any], epss: Dict[str, Any],
-                 affected: Optional[Dict[str, Any]] = None) -> None:
+                 affected: Optional[Dict[str, Any]] = None,
+                 ssvc: Optional[Dict[str, Any]] = None) -> None:
         self._kev = kev
         self._epss = epss
         self._affected = affected or {}
+        self._ssvc = ssvc or {}
         self._entries: Optional[List[Exploited]] = None
 
     # ── provenance ──────────────────────────────────────────────────────────
@@ -133,6 +135,28 @@ class Corpus:
         return [v for product in self.affected_for(cve)
                 for v in (product.get("versions") or [])]
 
+    # ── SSVC ────────────────────────────────────────────────────────────────
+    def ssvc_for(self, cve: str) -> Dict[str, Any]:
+        """CISA's SSVC decision points for one CVE, or an empty mapping."""
+        return dict((self._ssvc.get("ssvc") or {}).get(
+            str(cve).strip().upper()) or {})
+
+    def automatable(self, cve: str) -> Optional[bool]:
+        """Can this be exploited at scale without human effort?
+
+        None rather than False when CISA has not decided. "Not automatable" and
+        "nobody has assessed it" order differently, and collapsing them would
+        quietly push the unassessed down the worklist.
+        """
+        value = self.ssvc_for(cve).get("automatable")
+        if value is None:
+            return None
+        return str(value).strip().lower() == "yes"
+
+    @property
+    def has_ssvc(self) -> bool:
+        return bool(self._ssvc.get("ssvc"))
+
     # ── content ─────────────────────────────────────────────────────────────
     def entries(self) -> List[Exploited]:
         if self._entries is None:
@@ -198,4 +222,11 @@ def load(data_dir: Optional[str] = None) -> Corpus:
     affected_path = base / "affected.json"
     if affected_path.exists():
         affected = json.loads(affected_path.read_text(encoding="utf-8"))
-    return Corpus(kev, epss, affected)
+
+    # SSVC is optional for the same reason: without it the worklist orders on
+    # the signals it already had, which is P2 behaviour and still correct.
+    ssvc: Dict[str, Any] = {}
+    ssvc_path = base / "ssvc.json"
+    if ssvc_path.exists():
+        ssvc = json.loads(ssvc_path.read_text(encoding="utf-8"))
+    return Corpus(kev, epss, affected, ssvc)
