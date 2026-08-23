@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple
 
 from core.forecast import (OBSERVATION_WINDOW_DAYS, Forecast, Outcome,
                            score_record)
-from core.store import StoreUnavailable
+from core.store import StoreUnavailable, runtime_or_admin_dsn
 
 
 class ForecastStore(Protocol):
@@ -36,6 +36,9 @@ class ForecastStore(Protocol):
                     model: str = "") -> int: ...
 
     def epss_series(self, cve: str, days: int = 30) -> List[Tuple[date, float]]: ...
+
+    def epss_series_many(self, cves: Sequence[str], days: int = 30
+                        ) -> Dict[str, List[Tuple[date, float]]]: ...
 
 
 class MemoryForecastStore:
@@ -93,13 +96,20 @@ class MemoryForecastStore:
         rows = [(d, v[0]) for (c, d), v in self._epss.items() if c == wanted]
         return sorted(rows)[-days:]
 
+    def epss_series_many(self, cves, days=30):
+        return {str(c).upper(): self.epss_series(c, days) for c in cves}
+
 
 class PostgresForecastStore:
     def __init__(self, dsn: Optional[str] = None, migrate: bool = True) -> None:
-        self._dsn = dsn or os.environ.get("SKOPOS_DATABASE_URL")
+        self._dsn, is_admin = runtime_or_admin_dsn(dsn)
         if not self._dsn:
-            raise StoreUnavailable("SKOPOS_DATABASE_URL is not set")
-        if migrate:
+            raise StoreUnavailable(
+                "neither SKOPOS_DATABASE_URL nor SKOPOS_APP_DATABASE_URL is set")
+        # Only the admin identity may migrate. A pod holding just the runtime
+        # DSN is a correctly-secured deployment, not a broken one — its schema
+        # was applied by a separate migration step.
+        if migrate and is_admin:
             # Every store migrates, not just core/store.py. See
             # migrate.ensure_once for the deployment this was measured breaking.
             from core import migrate as _migrate
@@ -205,6 +215,35 @@ class PostgresForecastStore:
                 "SELECT observed_on, epss FROM epss_history WHERE cve = %s"
                 " ORDER BY observed_on DESC LIMIT %s", (str(cve).upper(), days))
             return [(r[0], float(r[1])) for r in reversed(cur.fetchall())]
+
+    def epss_series_many(self, cves, days=30):
+        """Every series in ONE query and ONE connection.
+
+        Measured: calling epss_series() per finding put /crosshair at 575ms
+        against 64 findings, because each call opened its own connection. The
+        route now answers in a fraction of that, and the improvement scales
+        with the finding count rather than being a fixed win.
+
+        `days` is applied per CVE in a window function rather than as a global
+        LIMIT — a plain LIMIT would return the newest N rows across ALL cves,
+        which for a busy CVE means every other one silently gets none.
+        """
+        wanted = sorted({str(c).upper() for c in cves if c})
+        if not wanted:
+            return {}
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT cve, observed_on, epss FROM ("
+                "  SELECT cve, observed_on, epss,"
+                "         row_number() OVER (PARTITION BY cve"
+                "                            ORDER BY observed_on DESC) AS rn"
+                "  FROM epss_history WHERE cve = ANY(%s)"
+                ") ranked WHERE rn <= %s ORDER BY cve, observed_on",
+                (wanted, days))
+            out: Dict[str, List[Tuple[date, float]]] = {c: [] for c in wanted}
+            for cve, observed_on, epss in cur.fetchall():
+                out[cve].append((observed_on, float(epss)))
+            return out
 
 
 def open_forecast_store(dsn: Optional[str] = None) -> ForecastStore:

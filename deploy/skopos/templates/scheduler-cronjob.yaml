@@ -1,0 +1,49 @@
+{{- if .Values.scheduler.enabled }}
+{{- include "skopos.checkDatabase" . -}}
+{{/*
+  The two jobs whose missed days can never be refilled.
+
+  A CronJob rather than the compose stack's sleep loop, because Kubernetes has a
+  scheduler and running a second one inside a container would be duplicating it.
+
+  concurrencyPolicy Forbid: snapshot_epss is idempotent per day, but two
+  resolve_forecasts runs racing on the same rows is a state nobody should have
+  to reason about.
+
+  OFF BY DEFAULT. It makes outbound requests to FIRST every day, unattended, and
+  a chart that started doing that on `helm install` would be making an egress
+  decision on the operator's behalf. The cost of leaving it off is real and
+  stated in values.yaml: EPSS never republishes a past day.
+*/}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "skopos.fullname" . }}-daily
+  labels: {{- include "skopos.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.scheduler.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels: {{- include "skopos.labels" . | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          securityContext: {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: daily
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              securityContext: {{- toYaml .Values.securityContext | nindent 16 }}
+              command: ["/bin/sh", "tools/daily.sh"]
+              env:
+                {{- include "skopos.runtimeEnv" . | nindent 16 }}
+                # Run once and exit; the CronJob owns the schedule.
+                - name: SKOPOS_SCHEDULE_SECONDS
+                  value: "0"
+              resources: {{- toYaml .Values.resources | nindent 16 }}
+{{- end }}

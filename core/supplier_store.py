@@ -17,7 +17,7 @@ import os
 from datetime import date
 from typing import Any, Dict, List, Optional, Protocol, Sequence
 
-from core.store import StoreUnavailable
+from core.store import StoreUnavailable, runtime_or_admin_dsn
 from core.suppliers import Posture, Supplier, Tier
 
 
@@ -75,14 +75,17 @@ class MemorySupplierStore:
 
 class PostgresSupplierStore:
     def __init__(self, dsn: Optional[str] = None, migrate: bool = True) -> None:
-        self._dsn = dsn or os.environ.get("SKOPOS_DATABASE_URL")
+        self._dsn, is_admin = runtime_or_admin_dsn(dsn)
         if not self._dsn:
-            raise StoreUnavailable("SKOPOS_DATABASE_URL is not set")
+            raise StoreUnavailable(
+                "neither SKOPOS_DATABASE_URL nor SKOPOS_APP_DATABASE_URL is set")
         try:
             import psycopg  # noqa: F401
         except ImportError as exc:  # pragma: no cover
             raise StoreUnavailable(f"psycopg is not installed: {exc}") from exc
-        if migrate:
+        # Only the admin identity may migrate. A pod holding just the runtime
+        # DSN is a correctly-secured deployment, not a broken one.
+        if migrate and is_admin:
             from core import migrate as _migrate
             _migrate.ensure_once(self._dsn)
 

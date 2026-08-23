@@ -176,7 +176,15 @@ than duplicated. And a ticket must carry the worklist/determination distinction
 in its body, because a ticket saying "CVE-2018-13379 on fw-01" reads as a
 determination to whoever picks it up.
 
-**TIP is provisionally NOT a connector.** TAXII 2.1 is the interface MISP and
+**TIP is NOT a connector - decided, not deferred.** Verified against current
+documentation: OpenCTI ships a native TAXII 2 connector and ingests TAXII 2.1,
+and MISP speaks TAXII too. A bespoke connector for either would re-implement the
+protocol both already consume, and would add a vendor auth flow this product
+would then hold credentials for. W3 ships ITSM plus a documented TAXII path.
+
+The original wording, kept because the reasoning is the point:
+
+**TIP was provisionally NOT a connector.** TAXII 2.1 is the interface MISP and
 OpenCTI already speak. Before writing either, the question to answer is what a
 bespoke connector adds over the protocol — and if the answer is "nothing", W3
 ships ITSM plus a documented TAXII integration path, and says so. That decision

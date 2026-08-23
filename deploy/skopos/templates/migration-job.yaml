@@ -1,0 +1,48 @@
+{{- include "skopos.checkDatabase" . -}}
+{{/*
+  Migrations run as a JOB with the superuser identity, before the Deployment.
+
+  Separated from the pods on purpose. If every replica migrated on startup, N
+  replicas would race to apply the same DDL, and the app would hold superuser
+  credentials for the whole of its life to do something it needs for two
+  seconds at install time.
+
+  The hook weight ordering means this completes before the Deployment rolls.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "skopos.fullname" . }}-migrate
+  labels: {{- include "skopos.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels: {{- include "skopos.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          command: ["python", "-c", "from core import migrate; print(migrate.ensure_current())"]
+          env:
+            # The ONLY place the superuser DSN appears. The Deployment never
+            # receives it.
+            - name: SKOPOS_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.migrationSecret.name }}
+                  key: {{ .Values.database.migrationSecret.key }}
+            - name: SKOPOS_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.appPasswordSecret.name }}
+                  key: {{ .Values.database.appPasswordSecret.key }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}

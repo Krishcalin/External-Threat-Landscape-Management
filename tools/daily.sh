@@ -25,6 +25,18 @@ while true; do
   echo "[skopos-scheduler] $(date -u +%Y-%m-%dT%H:%M:%SZ) resolve_forecasts"
   python -u tools/resolve_forecasts.py || echo "[skopos-scheduler] resolve_forecasts FAILED ($?)"
 
+  # RUN ONCE AND EXIT when the interval is 0 or "once". Kubernetes has its own
+  # scheduler, so the Helm chart runs this as a CronJob and a container that
+  # looped forever would never complete the Job — the CronJob would then refuse
+  # every subsequent run under concurrencyPolicy: Forbid, and the failure would
+  # look like "the schedule stopped firing".
+  case "${INTERVAL}" in
+    0|once)
+      echo "[skopos-scheduler] single run complete"
+      exit 0
+      ;;
+  esac
+
   echo "[skopos-scheduler] sleeping ${INTERVAL}s"
   sleep "${INTERVAL}"
 done

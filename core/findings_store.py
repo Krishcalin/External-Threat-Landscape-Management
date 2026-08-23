@@ -27,7 +27,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple
 
-from core.store import StoreUnavailable
+from core.store import StoreUnavailable, runtime_or_admin_dsn
 
 
 @dataclass
@@ -167,10 +167,14 @@ def _diff(before: Sequence[Dict[str, Any]], after: Sequence[Dict[str, Any]],
 
 class PostgresFindingsStore:
     def __init__(self, dsn: Optional[str] = None, migrate: bool = True) -> None:
-        self._dsn = dsn or os.environ.get("SKOPOS_DATABASE_URL")
+        self._dsn, is_admin = runtime_or_admin_dsn(dsn)
         if not self._dsn:
-            raise StoreUnavailable("SKOPOS_DATABASE_URL is not set")
-        if migrate:
+            raise StoreUnavailable(
+                "neither SKOPOS_DATABASE_URL nor SKOPOS_APP_DATABASE_URL is set")
+        # Only the admin identity may migrate. A pod holding just the runtime
+        # DSN is a correctly-secured deployment, not a broken one — its schema
+        # was applied by a separate migration step.
+        if migrate and is_admin:
             # Every store migrates, not just core/store.py. See
             # migrate.ensure_once for the deployment this was measured breaking.
             from core import migrate as _migrate

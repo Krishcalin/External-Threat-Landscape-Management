@@ -340,7 +340,7 @@ zero results.
 
 ## 10. Project status
 
-**P0 through P5 complete; P6 W1 and W2 shipped.** 812 tests (749 offline, 63 against a live PostgreSQL).
+**P0 through P6 complete.** 839 tests (776 offline, 63 against a live PostgreSQL).
 
 **Shipping:** passive discovery across four data classes, DNS records with
 run-over-run change tracking, dangling-record assessment, gated active

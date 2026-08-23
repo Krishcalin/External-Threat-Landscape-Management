@@ -146,6 +146,12 @@ OPERATIONS: Dict[str, Exposure] = {
     # findings get posted" is exactly the question an audit log should be able
     # to answer.
     "alert_dispatch": Exposure.PASSIVE,
+    # Outbound to the OPERATOR'S OWN ITSM endpoint, never to a target.
+    # Passive for the same reason alert_dispatch is: no packet reaches
+    # anybody's estate. What constrains it is that the destination is set
+    # in the environment and must be https, and that no HTTP route can
+    # trigger it.
+    "ticket_create": Exposure.PASSIVE,
     # Querying a public vulnerability database. Emits nothing toward the
     # customer's estate, so PASSIVE — and registered so a lookup appears in the
     # audit log like every other outbound call.

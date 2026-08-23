@@ -258,6 +258,21 @@ def run_scan(inventory_path: str = Query(..., description="CSV or JSON asset inv
         alerting_report = {"decided": None, "delivered": False, "channels": {},
                            "reason": f"alerting failed: {type(exc).__name__}: {exc}"}
 
+    # ITSM. Filed from diff.new ONLY, which is where the deduplication comes
+    # from: a finding carried over from the previous run was already ticketed on
+    # the run it first appeared, and identity is (asset, cve) - the same key the
+    # diff uses. That needs no ticket-tracking table and cannot drift out of
+    # step with the diff, because it IS the diff.
+    from core import itsm as _itsm
+    try:
+        itsm_report = _itsm.file_for_run(diff.new)
+    except Exception as exc:                                   # noqa: BLE001
+        itsm_report = {"decided": None, "filed": False,
+                       "reason": f"ticketing failed: {type(exc).__name__}: {exc}"}
+    # The bodies are not echoed into the scan response: they are long, and a
+    # scan result is not where somebody reads a ticket.
+    itsm_report.pop("tickets", None)
+
     return {
         "run": run_id,
         "scanned_at": date.today().isoformat(),
@@ -277,6 +292,7 @@ def run_scan(inventory_path: str = Query(..., description="CSV or JSON asset inv
         # — including "delivery is on and no channel is configured", which from
         # the outside is indistinguishable from a quiet run.
         "alerting": alerting_report,
+        "ticketing": itsm_report,
         "since_last_run": {
             "previous_run": diff.previous_run,
             "headline": diff.headline(),
@@ -715,9 +731,15 @@ def crosshair(limit: int = Query(200, ge=1, le=500)) -> Dict[str, Any]:
     try:
         from core.forecast_store import open_forecast_store
         forecasts = open_forecast_store()
+        # ONE query for every series, not one per finding. Measured: the
+        # per-finding loop that used to be here put this route at 575ms against
+        # 64 findings while every other route answered in under 30ms, because
+        # each call opened its own connection.
+        series_by_cve = forecasts.epss_series_many(
+            [row["cve"] for row in rows], days=30)
         for row in rows:
-            series = forecasts.epss_series(row["cve"], days=30)
-            reading = _velocity.compute(row["cve"], series)
+            reading = _velocity.compute(row["cve"],
+                                        series_by_cve.get(row["cve"], []))
             if reading and reading.accelerating:
                 moving.append(row["cve"])
     except StoreUnavailable:

@@ -1,0 +1,13 @@
+apiVersion: v2
+name: skopos
+description: External Threat Landscape Management — the API, console and scheduler
+type: application
+version: 0.1.0
+appVersion: "2.0"
+home: https://github.com/Krishcalin/External-Threat-Landscape-Management
+sources:
+  - https://github.com/Krishcalin/External-Threat-Landscape-Management
+keywords:
+  - security
+  - attack-surface
+  - threat-intelligence

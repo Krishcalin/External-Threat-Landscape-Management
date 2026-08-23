@@ -242,7 +242,7 @@ skopos/
 ├── db/                       001 schema · 002 DNS · 003 findings
 ├── data/                     kev.json, epss.json — VERSIONED INPUTS
 ├── docs/P1-BUILD-SPEC.md     the adversarial design pass, and its 86 problems
-└── tests/                    812 tests
+└── tests/                    839 tests
 ```
 
 ---
@@ -271,8 +271,8 @@ skopos/
 
 ## Status
 
-**P0 through P5 complete; P6 W1 and W2 shipped. 812 tests** (749 offline + 63
-against a live PostgreSQL).
+**P0 through P6 complete. 839 tests** (776 offline + 63 against a live
+PostgreSQL).
 
 **TEPS golden-tested against SRS §9.1** — the published worked example reproduces
 exactly at 78, every intermediate factor matching (E=0.817, X=1.000, A=0.850,
@@ -706,6 +706,69 @@ by owner hides the findings with no owner, which are precisely the ones that
 need a person. The due date renders as CISA's deadline for US federal agencies
 rather than as the reader's obligation, because for most readers that is what it
 is.
+
+**D41 - the performance guess was wrong, and measuring said so in one command.**
+`docs/P6-SCOPE.md` named connection-per-operation as W4's structural candidate
+and committed to measuring before touching it. Measured: /findings?limit=200
+answers in 28ms, so connections are cheap; /crosshair answered in 575ms, 20x
+every other route, because it called `epss_series()` ONCE PER FINDING and each
+call opened its own connection. An N+1, in which connection cost mattered only
+because it sat inside a loop.
+
+Batched into one windowed query: 575ms to 33ms, output byte-identical, and the
+win scales with the finding count. `days` is applied per CVE in a window
+function rather than as a global LIMIT - a plain LIMIT returns the newest N rows
+across ALL cves, so one busy CVE would silently starve every other. Pooling
+connections would have made 200 round trips slightly faster and left the shape
+of the bug untouched.
+
+**D42 - TIP is not a connector, and that is a decision with evidence.** The scope
+document recorded in advance that a bespoke MISP or OpenCTI connector must
+justify what it adds over the protocol both already speak, and that the default
+answer was "nothing". Verified: OpenCTI ships a native TAXII 2 connector and
+ingests TAXII 2.1; MISP speaks TAXII. So W3 ships ITSM and a documented TAXII
+path. Writing two connectors would have re-implemented a protocol both consume
+and added vendor auth flows this product would then hold credentials for.
+
+**D43 - a ticket is filed from the diff, which is where deduplication comes
+from.** A scan runs daily; 64 findings would be 64 tickets on Monday and 64 more
+on Tuesday, which is how an integration gets switched off in week two. Identity
+is `(asset, cve)` - the same key the run-over-run diff already uses - so tickets
+are filed from `diff.new` ONLY. A finding carried over was already ticketed on
+the run it first appeared. That needs no ticket-tracking table and cannot drift
+out of step with the diff, because it IS the diff.
+
+The worklist distinction is in the TITLE, not only the body: a queue is read as
+a list of titles and the body is opened after somebody has decided to act. A
+ticket saying "CVE-2018-13379 on fw-01" reads as a determination to whoever
+picks it up, and they will either patch something that was never affected or
+stop trusting the queue.
+
+Generic webhook rather than a ServiceNow SDK, as the scope document said in
+advance: three vendor integrations would each need an auth flow this product
+would store secrets for. The cost is stated rather than hidden - the customer
+writes a small mapping on their side.
+
+**D44 - the Helm chart is where the two-identity split gets tested, and it found
+a real gap.** The chart gives the pods only the unprivileged DSN, on purpose:
+row-level security does not apply to a superuser, so a pod holding the admin
+credential has no tenancy at all. Verifying it exposed that every store
+constructor demanded SKOPOS_DATABASE_URL before it would open - so a
+correctly-secured deployment could not start. Stores now accept either, and
+migrate only when they hold the ADMIN dsn, which is the right split anyway: N
+replicas racing to apply the same DDL on startup was never a good idea.
+
+A second bug found the same way: the CronJob passes SKOPOS_SCHEDULE_SECONDS=0 to
+`tools/daily.sh`, which looped `sleep 0` forever. The container never completed
+its Job, and under `concurrencyPolicy: Forbid` every subsequent run would have
+been refused - failing as "the schedule stopped firing" weeks later. The script
+now exits after one pass when the interval is 0 or "once". Both were caught by
+running the container, not by reading the chart.
+
+Stated limit: `helm lint` and `helm template` have NOT been run, because helm is
+not installed here. The chart is structurally validated - YAML parses, template
+delimiters balance, no secret carries a default - and it has not been rendered
+by helm.
 
 ## Running it
 

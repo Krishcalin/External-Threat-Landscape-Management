@@ -36,6 +36,30 @@ class StoreUnavailable(RuntimeError):
     """The datastore could not be reached or is not initialised."""
 
 
+def runtime_or_admin_dsn(explicit=None):
+    """Whichever DSN this process actually has, preferring the unprivileged one.
+
+    A deployment that does its migrations in a separate step — the Helm chart
+    runs them as a pre-install Job — gives its pods ONLY the runtime DSN, on
+    purpose: PostgreSQL row-level security does not apply to a superuser, so a
+    pod holding the admin credential has no tenancy even when the schema is
+    perfect.
+
+    Returns `(dsn, is_admin)`. `is_admin` decides whether this process may
+    attempt migrations at all.
+    """
+    import os
+    if explicit:
+        return explicit, True
+    admin = os.environ.get("SKOPOS_DATABASE_URL")
+    if admin:
+        return admin, True
+    runtime = os.environ.get("SKOPOS_APP_DATABASE_URL")
+    if runtime:
+        return runtime, False
+    return "", False
+
+
 class Store(Protocol):
     """What the service layer needs. Nothing more, so both backends stay small."""
 

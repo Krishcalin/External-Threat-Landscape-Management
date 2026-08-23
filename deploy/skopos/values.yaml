@@ -1,0 +1,118 @@
+# SKOPOS Helm values.
+#
+# NO SECRET HAS A VALUE HERE, AND NONE HAS A DEFAULT.
+# `values.yaml` is committed, pasted into tickets, and rendered into CI logs by
+# `helm template`. Every credential is referenced from an existing Secret by
+# name, and the chart REFUSES TO RENDER if the reference is missing — see
+# templates/_helpers.tpl. A chart that ships a working default password is how
+# a development credential reaches production.
+
+image:
+  repository: skopos
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+# ── the two database identities ────────────────────────────────────────────
+# The split is the whole reason tenancy is enforced rather than decorative.
+# PostgreSQL row-level security DOES NOT APPLY to a superuser or a role with
+# BYPASSRLS, so an application connecting as the owner has no tenancy at all
+# while the schema still reviews as multi-tenant. See db/006_tenancy.sql.
+database:
+  host: ""
+  port: 5432
+  name: skopos
+
+  # MIGRATION identity: superuser, owns the tables, runs as a Job before the
+  # Deployment. Bypasses RLS, which is correct for a migrator and is exactly
+  # why it must not serve requests.
+  migrationSecret:
+    name: ""         # REQUIRED. Secret holding the admin DSN.
+    key: dsn
+
+  # RUNTIME identity: skopos_app. Not superuser, no BYPASSRLS, owns nothing.
+  # Every store prefers this.
+  runtimeSecret:
+    name: ""         # REQUIRED. Secret holding the unprivileged DSN.
+    key: dsn
+
+  # Sets skopos_app's password during migration. Kept out of db/*.sql because a
+  # password in a migration is a password in the repository.
+  appPasswordSecret:
+    name: ""         # REQUIRED.
+    key: password
+
+# ── optional integrations, all off ─────────────────────────────────────────
+# Each is off by default and each says what leaving it off costs. Nothing here
+# starts making outbound requests because somebody installed the chart.
+api:
+  # Without it, the takeover route and the TAXII server are NOT REGISTERED AT
+  # ALL — not registered-and-401, because a 401 that can be probed is still an
+  # admission the data exists.
+  tokenSecret:
+    name: ""
+    key: token
+
+alerting:
+  # Delivering alerts describes your estate to a third party. Consent to running
+  # a scan is not consent to that.
+  onScan: false
+  webhookSecret:
+    name: ""
+    key: url
+
+itsm:
+  # Raising a ticket writes your unpatched systems into another company's
+  # database, and needs its own consent.
+  onScan: false
+  webhookSecret:
+    name: ""
+    key: url
+  tokenSecret:
+    name: ""
+    key: token
+
+scheduler:
+  # EPSS publishes today's scores and never republishes yesterday's, so every
+  # day this does not run is a permanent hole in every velocity figure computed
+  # afterwards, and a forecast that never resolves can never be scored.
+  #
+  # It is still off by default: a chart that began phoning FIRST because
+  # somebody ran `helm install` would be making an egress decision on the
+  # operator's behalf, which is what core/gate.py exists to prevent.
+  enabled: false
+  schedule: "17 3 * * *"
+
+tenancy:
+  orgId: default
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits:   { cpu: "1",  memory: 512Mi }
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  annotations: {}
+  tls: []
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
