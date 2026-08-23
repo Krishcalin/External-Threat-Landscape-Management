@@ -201,6 +201,14 @@ def score_exposure(exposure: Exposure,
     asset = exposure.asset
     entry = exposure.exploited
 
+    # PER-ASSET TIER. This used to be one run-wide value applied to every asset,
+    # which made business criticality constant across the estate and was one of
+    # the four reasons every finding scored identically. A caller-supplied tier
+    # is now the FALLBACK, used only where the asset itself records nothing.
+    from core import criticality as _criticality
+    resolved_tier = _criticality.for_asset(asset, asset_tier)
+    asset_tier = resolved_tier.value
+
     verdict: Optional[Verdict] = None
     basis = exposure.basis
     evidence = list(exposure.evidence)
@@ -249,7 +257,12 @@ def score_exposure(exposure: Exposure,
             in_kev=True,                    # every catalogue entry is KEV
             epss=entry.epss or 0.0,
         ),
-        adversary=adversary or scoring.AdversaryInterest(),
+        # Fall back to what the CATALOGUE can support rather than to an empty
+        # factor. An empty AdversaryInterest scores 0.0 and is indistinguishable
+        # from "no adversary is interested", when the truth is that nothing
+        # filled it — see the class docstring for why the triad cannot be.
+        adversary=adversary or scoring.AdversaryInterest.from_catalogue(
+            bool(entry.known_ransomware)),
         asset_tier=asset_tier,
         mitigation=mitigation,
         match_confidence=match_conf,

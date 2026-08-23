@@ -157,9 +157,17 @@ def run_scan(inventory_path: str = Query(..., description="CSV or JSON asset inv
                 assets.append(c.asset)
 
     declared = {a.identifier for a in assets if a.source != "overwatch"}
-    adversary = scoring.AdversaryInterest(sector_match=sector_match,
-                                          geo_match=geo_match,
-                                          tech_match=tech_match)
+    # Pass None unless the OPERATOR actually supplied triad values, so the
+    # engine falls back to what the catalogue can support. An all-zero
+    # AdversaryInterest is still a truthy object, so constructing one
+    # unconditionally silently defeated that fallback and left 25% of every
+    # score multiplied by zero — measured: 64 of 64 findings at adversary 0.0.
+    supplied_triad = any((sector_match, geo_match, tech_match))
+    adversary = (scoring.AdversaryInterest(sector_match=sector_match,
+                                           geo_match=geo_match,
+                                           tech_match=tech_match,
+                                           supplied=True)
+                 if supplied_triad else None)
     catalogue = corpus.entries()
     from core import reach
 

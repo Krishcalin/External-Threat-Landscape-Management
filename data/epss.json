@@ -3,7 +3,7 @@
   "source": "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz",
   "licence": "FIRST.org EPSS — free for any use with attribution",
   "model": "model_version:v2026.06.15",
-  "retrieved_at": "2026-08-22T14:10:59+00:00",
+  "retrieved_at": "2026-08-23T02:24:30+00:00",
   "scope": "KEV subset",
   "count": 1674,
   "note": "EPSS is a FORECAST of exploitation and KEV is an OBSERVATION of it. This product ranks with EPSS and never claims exploitation from it."

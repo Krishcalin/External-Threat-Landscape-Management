@@ -119,16 +119,58 @@ class Exploitability:
 
 @dataclass(frozen=True)
 class AdversaryInterest:
-    """§9.1 A — the triad match. Who has a reason to come for this."""
+    """§9.1 A — the triad match. Who has a reason to come for this.
+
+    THE TRIAD CANNOT BE BUILT FROM OPEN DATA, AND THIS SAYS SO.
+
+    The specification asks for sector, geography and technology matching driven
+    by ATT&CK Groups. Measured against the real dataset (enterprise-attack.json,
+    51 MB, 191 intrusion-sets):
+
+      * ZERO ATT&CK objects carry a CVE external reference. There is no path
+        from "this CVE is in my estate" to "this group uses it".
+      * Group objects have no structured sector or geography field. Targeting
+        appears only in prose. Keyword matching reaches 125/191 for sectors and
+        131/191 for geographies, but a description mentioning "financial" may be
+        a citation or a negation — presence is not attribution.
+
+    So the sector, geography and technology legs are UNSUPPLIED rather than
+    zero, and `supplied` tells them apart. A product that filled them with prose
+    keyword matches would be manufacturing the exact kind of confident claim
+    this codebase refuses everywhere else, and it would poison the backtesting
+    harness that is supposed to demonstrate the opposite.
+
+    `named_mention` IS supportable: CISA records ransomware-campaign use per
+    entry, which is an observation rather than an inference. It carries the
+    smallest weight in §9.1, so a ransomware-linked CVE gains 0.15 * 0.25 =
+    0.037 of TEPS on its own. That is a real and small signal, and reporting it
+    as small is the point.
+    """
 
     sector_match: float = 0.0
     geo_match: float = 0.0
     tech_match: float = 0.0
     named_mention: float = 0.0
+    #: False when nothing filled the triad. Distinct from a supplied zero: "no
+    #: adversary has a known reason to target this" and "we have no data on
+    #: whether one does" are different statements, and 25% of every score turns
+    #: on which one it is.
+    supplied: bool = False
 
     def value(self) -> float:
         return clamp01(0.35 * self.sector_match + 0.20 * self.geo_match
                        + 0.30 * self.tech_match + 0.15 * self.named_mention)
+
+    @property
+    def triad_unsupplied(self) -> bool:
+        """The three legs the open data cannot fill."""
+        return not (self.sector_match or self.geo_match or self.tech_match)
+
+    @staticmethod
+    def from_catalogue(known_ransomware: bool = False) -> "AdversaryInterest":
+        """What the vendored corpus can honestly support, and nothing more."""
+        return AdversaryInterest(named_mention=1.0 if known_ransomware else 0.0,
+                                 supplied=True)
 
 
 @dataclass(frozen=True)
@@ -204,6 +246,15 @@ def score(exposure: Exposure,
         flags.append(f"no published CVSS; scored with an assumed {ASSUMED_CVSS}")
     if asset_tier is None:
         flags.append("asset has no criticality tier; scored at the midpoint")
+    if adversary.triad_unsupplied:
+        # 25% of the score. Leaving this unflagged would let a number computed
+        # from three of four factors present itself as a complete one, and the
+        # reader has no way to see the difference from the total alone.
+        flags.append(
+            f"adversary interest is {W_ADVERSARY:.0%} of this score and its "
+            f"sector/geography/technology legs are UNSUPPLIED — ATT&CK carries "
+            f"no CVE linkage and no structured targeting data, so no open "
+            f"source can fill them")
     if match_confidence == "possible":
         # THE FLAG THE SRS DOES NOT HAVE, and the one the data says matters. A
         # heuristic product-name match is not a confirmed affected version, and a
