@@ -8,6 +8,9 @@
 // Run it against a running stack:  npm run render-check
 import { renderToString } from 'react-dom/server'
 import { AccuracyPanel } from '../src/components/AccuracyPanel'
+import { ExecutivePanel } from '../src/components/ExecutivePanel'
+import { OperationsPanel } from '../src/components/OperationsPanel'
+import { SupplierPanel } from '../src/components/SupplierPanel'
 import { AlertsPanel } from '../src/components/AlertsPanel'
 import { CompliancePanel } from '../src/components/CompliancePanel'
 import { CoveragePanel } from '../src/components/CoveragePanel'
@@ -32,11 +35,16 @@ const get = async (p: string) => {
 }
 
 async function main() {
+  const summary = await get('/summary')
   const [cii, certin, controls, accuracy, alerts, tenancy, intel, crosshair,
          latency, dns] = await Promise.all([
     get('/compliance/cii'), get('/compliance/cert-in'), get('/compliance/controls'),
     get('/accuracy'), get('/alerts'), get('/tenancy'), get('/intel'),
     get('/crosshair?limit=200'), get('/latency'), get('/dns/runs?limit=20'),
+  ])
+  const [suppliers, runs, changes, findings] = await Promise.all([
+    get('/suppliers'), get('/runs?limit=20'), get('/changes'),
+    get('/findings?limit=200'),
   ])
 
   const cases: [string, () => JSX.Element][] = [
@@ -51,6 +59,17 @@ async function main() {
     ['Crosshair', () => <CrosshairPanel view={crosshair} latency={latency} />],
     ['Crosshair (null)', () => <CrosshairPanel view={null} latency={null} />],
     ['Coverage', () => <CoveragePanel run={dns?.runs?.[0] ?? null} />],
+    ['Suppliers', () => <SupplierPanel register={suppliers} />],
+    ['Suppliers (null)', () => <SupplierPanel register={null} />],
+    ['Executive', () => <ExecutivePanel runs={runs?.runs ?? []} accuracy={accuracy}
+                                        crosshair={crosshair} suppliers={suppliers}
+                                        summary={summary} />],
+    ['Executive (empty)', () => <ExecutivePanel runs={[]} accuracy={null}
+                                                crosshair={null} suppliers={null}
+                                                summary={null} />],
+    ['Operations', () => <OperationsPanel findings={findings?.findings ?? []}
+                                          changes={changes} />],
+    ['Operations (empty)', () => <OperationsPanel findings={[]} changes={null} />],
   ]
 
   let failed = 0

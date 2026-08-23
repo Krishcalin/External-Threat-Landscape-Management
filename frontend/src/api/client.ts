@@ -1,6 +1,7 @@
 import type { Accuracy, AlertsView, CertInStatus, CiiRegister,
               ControlMapping, CrosshairView, DnsRunsPage, FindingsPage,
-              IntelStatus, LatencyReport, Summary, Tenancy } from './types'
+              ChangesView, IntelStatus, LatencyReport, RunsPage, Summary,
+              SupplierRegister, Tenancy } from './types'
 
 /** Relative paths only: the built bundle carries no origin, so it can be served
  *  by the API itself in a deployment and proxied in development. */
@@ -71,3 +72,13 @@ export const tenancy = () => get<Tenancy>('/tenancy')
  *  button that produced a regulator-facing document from a finding would be
  *  exactly the path `core/cert_in.py` refuses to provide. Whoever files makes
  *  that determination first, and they do it deliberately. */
+
+/* ── suppliers ─────────────────────────────────────────────────────────────
+ * Read-only from the console. Declaring a supplier and assessing one are both
+ * POSTs somebody makes on purpose — assessment performs outbound lookups
+ * against a third party, and that is not something a page refresh should do. */
+export const supplierRegister = () => get<SupplierRegister>('/suppliers')
+
+/* ── the projections ──────────────────────────────────────────────────────── */
+export const runs = () => get<RunsPage>('/runs?limit=20')
+export const changes = () => get<ChangesView>('/changes')

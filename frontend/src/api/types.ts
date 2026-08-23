@@ -335,3 +335,74 @@ export interface Tenancy {
   enforcement: string
   bound_org: string | null
 }
+
+/* ── suppliers ─────────────────────────────────────────────────────────────
+ * There is no vulnerability field here, and there cannot be. A supplier's
+ * estate is somebody else's; the gate refuses every active operation against
+ * an unverified asset, so there is no fingerprint, no product name, and no CVE
+ * join. A supplier CVE count would be a fabrication. */
+
+export interface SupplierPosture {
+  supplier: string
+  domain: string
+  tier: string
+  tier_meaning: string
+  dependency: string | null
+  present: string[]
+  absent: string[]
+  /** Kept apart from `absent` on purpose: our coverage gap is not their gap. */
+  unobserved: string[]
+  providers: Record<string, string>
+  notes: string[]
+  signal_meaning: Record<string, { means: string; does_not_mean: string }>
+}
+
+export interface ConcentrationRow {
+  kind: string
+  provider: string
+  suppliers: string[]
+  count: number
+  critical_suppliers: number
+  share_of_register: number | null
+}
+
+export interface SupplierRegister {
+  headline: string
+  suppliers: SupplierPosture[]
+  concentrations: ConcentrationRow[]
+  /** A correlation in availability and blast radius — not a shared vuln. */
+  concentration_meaning: string
+  /** Present when the register is too small to support a conclusion. */
+  concentration_refused: string | null
+  minimum_register: number
+  no_cve_join: string
+  assessed: number
+  never_assessed: number
+  discrimination: string
+  /** Presence-of-SPF and presence-of-DMARC are excluded: measured 8/8. */
+  ranking_signals: string[]
+}
+
+/* ── the projections ──────────────────────────────────────────────────────── */
+export interface RunRow {
+  id: number
+  scanned_at: string
+  actor: string
+  catalog_version: string
+  catalog_age_days: number | null
+  assets_read: number
+  assets_unmatched: number
+  summary: Record<string, number>
+}
+
+export interface RunsPage { runs: RunRow[] }
+
+export interface ChangesView {
+  previous_run: number | null
+  is_baseline: boolean
+  headline: string
+  new: number
+  resolved: number
+  changed_band: number
+  carried: number
+}

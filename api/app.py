@@ -923,6 +923,161 @@ def tenancy_status() -> Dict[str, Any]:
     return payload
 
 
+# ---------------------------------------------------------------------------
+# Suppliers. Declared by the customer, assessed passively, and never joined to
+# a CVE — see core/suppliers.py for why that last one is structural.
+
+
+def _supplier_store():
+    from core.supplier_store import open_supplier_store
+    return open_supplier_store()
+
+
+class _SupplierBody(BaseModel):
+    name: str
+    domain: str
+    tier: str
+    dependency: str = ""
+    declared_by: str
+
+
+@app.get("/api/v1/suppliers", tags=["suppliers"])
+def supplier_register() -> Dict[str, Any]:
+    """The register, with the most recent passive observation of each.
+
+    Never triggers collection. A GET that went and queried thirty suppliers'
+    DNS would make the cost of loading a page depend on how many third parties
+    somebody declared, and would put outbound lookups behind a page refresh.
+    Assessment is a POST somebody makes on purpose.
+    """
+    from core import suppliers as _suppliers
+
+    store = _supplier_store()
+    declared = store.suppliers()
+    observations = store.latest_observations()
+
+    postures = []
+    for supplier in declared:
+        seen = observations.get(supplier.domain)
+        posture = _suppliers.Posture(supplier=supplier)
+        if seen:
+            def _signals(key):
+                out = []
+                for value in seen.get(key) or []:
+                    try:
+                        out.append(_suppliers.Signal(value))
+                    except ValueError:
+                        continue        # a signal this build no longer models
+                return out
+            posture.present = _signals("present")
+            posture.absent = _signals("absent")
+            posture.unobserved = _signals("unobserved")
+            posture.providers = dict(seen.get("providers") or {})
+            posture.notes = list(seen.get("notes") or [])
+        else:
+            # Declared but never assessed. Every signal is UNOBSERVED, which is
+            # the truth — reporting them as absent would be this product's
+            # inaction rendered as the supplier's neglect.
+            posture.unobserved = list(_suppliers.Signal)
+        postures.append(posture)
+
+    findings, refusal = _suppliers.concentrations(postures)
+    register = _suppliers.Register(postures=postures, findings=findings,
+                                   refusal=refusal)
+    payload = register.to_dict()
+    payload["assessed"] = sum(1 for p in postures if p.observed)
+    payload["never_assessed"] = sum(1 for p in postures if not p.observed)
+    payload["discrimination"] = _suppliers.DISCRIMINATING and _suppliers.DISCRIMINATION
+    payload["ranking_signals"] = [s.value for s in _suppliers.DISCRIMINATING]
+    return payload
+
+
+@app.post("/api/v1/suppliers", tags=["suppliers"])
+def declare_supplier(body: _SupplierBody) -> Dict[str, Any]:
+    """Record a supplier relationship. Declared, never inferred.
+
+    There is deliberately no discovery endpoint that proposes suppliers from
+    DNS. Inventing a commercial relationship is worse than an empty register:
+    the organisation would either assess a company it has no dealings with, or
+    believe a real dependency was covered.
+    """
+    from core import suppliers as _suppliers
+    try:
+        supplier = _suppliers.Supplier(
+            name=body.name, domain=body.domain.strip().lower(),
+            tier=_suppliers.Tier(body.tier), dependency=body.dependency,
+            declared_by=body.declared_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error": str(exc),
+            "tiers": [t.value for t in _suppliers.Tier]})
+    identifier = _supplier_store().declare(supplier)
+    return {"id": identifier, "domain": supplier.domain,
+            "tier": supplier.tier.value,
+            "tier_meaning": supplier.tier.meaning,
+            "assessed": False,
+            "note": ("Declared. Nothing has been looked up yet — POST "
+                     "/api/v1/suppliers/assess to observe what they publish.")}
+
+
+@app.delete("/api/v1/suppliers/{domain}", tags=["suppliers"])
+def forget_supplier(domain: str) -> Dict[str, Any]:
+    removed = _supplier_store().forget(domain)
+    if not removed:
+        raise HTTPException(status_code=404,
+                            detail=f"{domain!r} is not in the register")
+    return {"domain": domain, "removed": True,
+            "note": "Observations for this supplier were removed with it."}
+
+
+@app.post("/api/v1/suppliers/assess", tags=["suppliers"])
+def assess_suppliers(actor: str = Query(..., min_length=3)) -> Dict[str, Any]:
+    """Observe what every declared supplier publishes. PASSIVE ONLY.
+
+    A POST because it performs outbound lookups, and an actor is required
+    because every permit names one — an unattributed lookup against a third
+    party is not something this product will do.
+
+    Nothing here can reach the supplier's own infrastructure: every operation
+    available is passive and travels to a public recursive resolver. The four
+    active operations are refused against an unverified asset by the gate, and
+    a supplier's domain can never be verified by the customer.
+    """
+    from collect import supplier_scan
+    from core import suppliers as _suppliers
+
+    store = _supplier_store()
+    declared = store.suppliers()
+    if not declared:
+        return {"assessed": 0, "note": (
+            "The register is empty. An empty register is not a supply chain "
+            "with no third parties — it is one nobody has written down.")}
+
+    try:
+        result = supplier_scan.observe(declared, actor=actor)
+    except Exception as exc:                                    # noqa: BLE001
+        raise HTTPException(status_code=502, detail={
+            "error": f"{type(exc).__name__}: {exc}",
+            "why": "the lookups failed; no observation was recorded rather "
+                   "than a partial one being written as fact"})
+
+    postures = [_suppliers.assess(
+        supplier,
+        records=(result["observations"].get(supplier.domain) or {}).get("records", {}))
+        for supplier in declared]
+    written = store.record_observations(postures)
+
+    return {
+        "assessed": written,
+        "attempted_lookups": result["attempted"],
+        "observed_lookups": result["observed"],
+        "refused": result["refused"],
+        # Stated rather than implied: an assessment built on a sweep that half
+        # failed is a different claim from one built on a clean sweep.
+        "coverage_note": result["note"],
+    }
+
+
 @app.get("/api/v1/compliance/controls", tags=["compliance"])
 def compliance_controls(framework: Optional[str] = None) -> Dict[str, Any]:
     """Which controls this product helps evidence, and what it does not do.

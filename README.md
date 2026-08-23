@@ -340,7 +340,7 @@ zero results.
 
 ## 10. Project status
 
-**P0 through P5 complete.** 767 tests (704 offline, 63 against a live PostgreSQL).
+**P0 through P5 complete; P6 W1 and W2 shipped.** 812 tests (749 offline, 63 against a live PostgreSQL).
 
 **Shipping:** passive discovery across four data classes, DNS records with
 run-over-run change tracking, dangling-record assessment, gated active
@@ -358,12 +358,24 @@ it also found only **one of four** latency reference classes has enough resolved
 samples to forecast from, so the other three refuse. P4 found that **seven of
 eight** CERT-In reportable categories are not observable from outside an estate.
 
-**The console** has six sections — Worklist, Crosshair, Alerts, Compliance,
-Accuracy, and This instance — served at `/` by the same container as the API.
-Everything the engines produce is now reachable without curl.
+**The console** has nine sections — Worklist, Operations, Executive, Crosshair,
+Suppliers, Alerts, Compliance, Accuracy, and This instance. Operations,
+Executive and Worklist are the SRS's three projections of one graph, adjacent so
+it is obvious they are the same data asked three different questions.
 
-**Next:** the last mile of tenancy, if the deployment model calls for it (see
-below), plus whatever running this in anger turns up.
+**Third parties are assessed passively, and cannot be assessed any other way.**
+A supplier's estate belongs to somebody else, the customer cannot prove
+ownership of it, and the gate refuses every active operation against an
+unverified asset. No active probe means no fingerprint, no fingerprint means no
+product name, and no product name means **SKOPOS never reports a supplier
+vulnerability** — the panel says so where a competitor would put a count. What
+it reports instead is published configuration, and which providers the register
+shares. Measured before the screen was built: SPF 8/8 and DMARC 8/8 across real
+domains, so presence separates nobody; enforcement, CAA and MTA-STS lead.
+
+**Next:** P6 W3 (ITSM connector; TIP is provisionally already served by TAXII)
+and W4 (Helm, performance). Then the last mile of tenancy, if the deployment
+model calls for it — see below.
 
 **Tenancy serves one organisation per deployment today.** The enforcement is
 built and proven; the last mile is not. Every request resolves to

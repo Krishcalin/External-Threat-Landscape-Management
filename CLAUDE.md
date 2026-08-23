@@ -242,7 +242,7 @@ skopos/
 ├── db/                       001 schema · 002 DNS · 003 findings
 ├── data/                     kev.json, epss.json — VERSIONED INPUTS
 ├── docs/P1-BUILD-SPEC.md     the adversarial design pass, and its 86 problems
-└── tests/                    767 tests
+└── tests/                    812 tests
 ```
 
 ---
@@ -271,8 +271,8 @@ skopos/
 
 ## Status
 
-**P0 through P5 complete. 767 tests** (704 offline + 63 against a live
-PostgreSQL).
+**P0 through P5 complete; P6 W1 and W2 shipped. 812 tests** (749 offline + 63
+against a live PostgreSQL).
 
 **TEPS golden-tested against SRS §9.1** — the published worked example reproduces
 exactly at 78, every intermediate factor matching (E=0.817, X=1.000, A=0.850,
@@ -645,6 +645,67 @@ non-200. Two other things the sweep caught: `.chip`, `.gap-list`, `.num` and
 `.lede` were referenced by the existing Crosshair and Coverage panels and had
 never been written, so those elements had been rendering as unstyled defaults;
 and the `IntelStatus` type was two fields behind the API it describes.
+
+**D37 - a truncated DNS answer is not an empty one, and this was live for five
+phases.** Found by pointing W1's supplier collector at real domains, the only
+way it could have been found: no fixture has a record set large enough to
+truncate. github.com came back with "no SPF record"; it has one. Its apex TXT
+set does not fit in a datagram, the resolver returns TC with ancount=0, and that
+is byte-identical to NODATA unless somebody reads the flag. The parser did not.
+
+Never supplier-specific. TXT is in DEFAULT_RRTYPES, so the CUSTOMER'S OWN sweep
+has recorded large TXT sets as absent since P1 and `dns_state` treated that as
+an observation. It is exactly the failure `core/suppliers.py` was written to
+prevent one layer up - our coverage gap reported as their configuration - with
+the safeguard in the reasoning module and the bug underneath it in the wire.
+
+Fixed twice over: `Response.truncated` makes TC non-conclusive so it reports as
+UNOBSERVED, and `resolve_over_tcp` re-asks over TCP as RFC 1035 4.2.2 requires,
+because marking it inconclusive alone leaves every large TXT set permanently
+invisible - honest and useless. `egress.tcp` gained the allowlist `udp` already
+had, same rule: a passive permit proved no ownership, so its destination is not
+a free-form argument. Verified live: github 23 TXT records, cloudflare 28.
+
+**D38 - the gate decided the supplier feature before it was designed.** Measured
+with a supplier domain explicitly IN SCOPE and no verification: five passive
+operations allowed, all four active ones refused with `OwnershipNotVerified`.
+Passive-only is not the cautious reading of P6 - it is the only thing the
+architecture permits, and no scope rule changes it.
+
+The consequence runs all the way down: no active probe, no fingerprint, no
+product name, NO CVE JOIN FOR A SUPPLIER, EVER. `db/007` has no supplier_finding
+table, `core/suppliers.py` has no function that could produce one, and tests
+assert their absence by name. The panel states it where a competitor puts a
+count, because a suspicious gap invites somebody to fill it.
+
+**D39 - presence stopped being a signal, so the screen stopped leading with it.**
+`docs/P6-SCOPE.md` said in advance that this plan is wrong if suppliers publish
+almost no posture records. Measured across 8 real domains: SPF 8/8, DMARC 8/8,
+enforcement 7/8, CAA 3/8, MTA-STS 1/8. The answer was not "posture says nothing"
+- it was that PRESENCE says nothing, because publishing SPF and DMARC is now
+universal. `DISCRIMINATING` excludes both and the table leads with how far a
+supplier took it. A screen opening with a column of "yes" teaches its reader
+that the whole panel is decorative.
+
+Concentration refuses below 8 suppliers and returns the refusal as a value the
+screen renders. Live against a real register of 8: outlook.com carries 3 of them
+(37.5%), Cloudflare DNS 2 - the one output a questionnaire cannot produce,
+because no supplier can see it about the others.
+
+**D40 - the projections were built because the measurement came back positive.**
+`App.tsx` warned that a Management view with fewer columns is not an executive
+view, so the measurement came first: 10 runs on record, and 64 of 64 findings
+carrying an owner, a due date and a required action across 6 teams. The three
+views ask genuinely different questions of one graph.
+
+Two choices follow. Executive leads with COVERAGE, because the honest answer to
+"where do we spend next" is usually the part the product cannot see, and on
+every other screen that is a caveat below the result. Operations sorts
+UNASSIGNED first and never filters it away - every operations screen that groups
+by owner hides the findings with no owner, which are precisely the ones that
+need a person. The due date renders as CISA's deadline for US federal agencies
+rather than as the reader's obligation, because for most readers that is what it
+is.
 
 ## Running it
 

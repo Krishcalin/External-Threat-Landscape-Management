@@ -5,12 +5,18 @@ import { accuracy as fetchAccuracy, alerts as fetchAlerts,
          latency as fetchLatency,
          dnsRuns as fetchDnsRuns, findings as fetchFindings,
          intel as fetchIntel, reconciliationGuide,
+         changes as fetchChanges, runs as fetchRuns,
+         supplierRegister as fetchSuppliers,
          summary as fetchSummary, tenancy as fetchTenancy } from './api/client'
 import type { Accuracy, AlertsView, CertInStatus, CiiRegister, ControlMapping,
               CrosshairView, DnsRun, Finding, IntelStatus, LatencyReport,
               ReconciliationOutcome,
+              ChangesView, RunRow, SupplierRegister,
               Summary, Tenancy } from './api/types'
 import { AccuracyPanel } from './components/AccuracyPanel'
+import { ExecutivePanel } from './components/ExecutivePanel'
+import { OperationsPanel } from './components/OperationsPanel'
+import { SupplierPanel } from './components/SupplierPanel'
 import { AlertsPanel } from './components/AlertsPanel'
 import { CompliancePanel } from './components/CompliancePanel'
 import { CoveragePanel } from './components/CoveragePanel'
@@ -40,14 +46,19 @@ import { TepsBar } from './components/TepsBar'
  * a console and a dashboard.
  */
 
-type Section = 'worklist' | 'crosshair' | 'compliance' | 'accuracy'
-  | 'alerts' | 'system'
+type Section = 'worklist' | 'operations' | 'executive' | 'crosshair'
+  | 'suppliers' | 'compliance' | 'accuracy' | 'alerts' | 'system'
 
 /** Worklist first because it is what somebody opens the console to do; System
  *  last because it answers a question asked once per deployment. */
 const SECTIONS: { id: Section; label: string }[] = [
   { id: 'worklist', label: 'Worklist' },
+  // The three SRS projections of one graph, adjacent so it is obvious they are
+  // the same data asked three questions rather than three products.
+  { id: 'operations', label: 'Operations' },
+  { id: 'executive', label: 'Executive' },
   { id: 'crosshair', label: 'Crosshair' },
+  { id: 'suppliers', label: 'Suppliers' },
   { id: 'alerts', label: 'Alerts' },
   { id: 'compliance', label: 'Compliance' },
   { id: 'accuracy', label: 'Accuracy' },
@@ -189,6 +200,9 @@ export function App() {
   const [accuracy, setAccuracy] = useState<Accuracy | null>(null)
   const [alerts, setAlerts] = useState<AlertsView | null>(null)
   const [tenancy, setTenancy] = useState<Tenancy | null>(null)
+  const [supplierRegister, setSupplierRegister] = useState<SupplierRegister | null>(null)
+  const [runs, setRuns] = useState<RunRow[]>([])
+  const [changes, setChanges] = useState<ChangesView | null>(null)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -227,6 +241,9 @@ export function App() {
     fetchAccuracy().then(setAccuracy).catch(() => setAccuracy(null))
     fetchAlerts().then(setAlerts).catch(() => setAlerts(null))
     fetchTenancy().then(setTenancy).catch(() => setTenancy(null))
+    fetchSuppliers().then(setSupplierRegister).catch(() => setSupplierRegister(null))
+    fetchRuns().then((page) => setRuns(page.runs)).catch(() => setRuns([]))
+    fetchChanges().then(setChanges).catch(() => setChanges(null))
   }, [])
 
   const unexplained = summary?.reconciliation?.unexplained_exposure ?? 0
@@ -290,6 +307,19 @@ export function App() {
       <main className="main stack" role="tabpanel"
             id={`panel-${section}`} aria-labelledby={`tab-${section}`}>
         {error && <div className="banner banner-crit" role="alert">{error}</div>}
+
+        {section === 'operations' && (
+          <OperationsPanel findings={rows} changes={changes} />
+        )}
+
+        {section === 'executive' && (
+          <ExecutivePanel runs={runs} accuracy={accuracy} crosshair={crosshair}
+                          suppliers={supplierRegister} summary={summary} />
+        )}
+
+        {section === 'suppliers' && (
+          <SupplierPanel register={supplierRegister} />
+        )}
 
         {section === 'crosshair' && (
           <CrosshairPanel view={crosshair} latency={latency} />
