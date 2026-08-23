@@ -1258,6 +1258,149 @@ def lookup_sources() -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Brand and identity exposure. Both passive; neither renders a verdict.
+
+
+class _BrandBody(BaseModel):
+    terms: List[str]
+    owned: List[str] = []
+    declared_by: str
+
+
+@app.post("/api/v1/brand/lookalikes", tags=["brand"])
+def brand_lookalikes(body: _BrandBody) -> Dict[str, Any]:
+    """Names in certificate transparency that borrow a declared term.
+
+    A password-harvesting site needs HTTPS to look legitimate, which needs a
+    certificate, which lands in a public log. So this finds imitation with no
+    cooperation from the impersonator and no packet sent to them.
+
+    IT ESTABLISHES NOTHING. A name that borrows your term and sits outside the
+    domains you declared owning may be a phishing site, a partner, a reseller or
+    an unrelated company. Deciding which is a judgement about your commercial
+    relationships, and a takedown filed against a legitimate reseller is worse
+    than a missed phishing domain — it is an action you took on our say-so.
+    """
+    from collect import lookalike_scan
+    from core import gate as _gate
+    from core import lookalike as _lookalike
+    from core.scope import Scope, ScopeKind, ScopeRule
+
+    try:
+        brand = _lookalike.Brand(terms=tuple(body.terms),
+                                 owned=tuple(body.owned),
+                                 declared_by=body.declared_by)
+    except _lookalike.BrandError as exc:
+        raise HTTPException(status_code=422, detail={"error": str(exc)})
+
+    anchor = brand.owned[0] if brand.owned else brand.terms[0] + ".invalid"
+
+    def permit_for(operation: str):
+        scope = Scope([ScopeRule(kind=ScopeKind.DOMAIN, value=anchor)])
+        return _gate.authorise(anchor, operation, brand.declared_by, scope,
+                               kind=ScopeKind.DOMAIN)
+
+    try:
+        observed = lookalike_scan.observe(list(brand.terms), permit_for)
+    except Exception as exc:                                    # noqa: BLE001
+        raise HTTPException(status_code=502, detail={
+            "error": f"{type(exc).__name__}: {exc}",
+            "why": "no partial result is returned as fact"})
+
+    report = _lookalike.build(brand, observed["names"],
+                              searched=observed["searched"],
+                              unavailable=observed["unavailable"])
+    payload = report.to_dict()
+    payload["terms"] = list(brand.terms)
+    payload["owned"] = list(brand.owned)
+    return payload
+
+
+class _AccountBody(BaseModel):
+    address: str
+    actor: str
+
+
+@app.post("/api/v1/identity/breaches", tags=["brand"])
+def account_breaches(body: _AccountBody) -> Dict[str, Any]:
+    """Whether an email address appears in a published breach corpus.
+
+    THIS IS THE ONE PLACE AN EMAIL ADDRESS IS AN INPUT. `/api/v1/lookup`
+    refuses one on purpose — breach exposure is a different question with a
+    different source, and answering it from the same box would mean one screen
+    quietly doing two unrelated things.
+
+    What it says: this address appeared in a corpus published on a date. What it
+    does NOT say: that the account is compromised now, that the password is
+    still in use, or that anything should be revoked. That remedy is somebody's
+    judgement and it is not this product's to assert.
+    """
+    from collect import keyed_sources
+    from core import gate as _gate
+    from core.scope import Scope, ScopeKind, ScopeRule
+
+    address = str(body.address or "").strip().lower()
+    if "@" not in address or "." not in address.split("@")[-1]:
+        raise HTTPException(status_code=422, detail={
+            "error": f"{body.address!r} is not an email address",
+            "note": "for a domain or an address, use /api/v1/lookup"})
+
+    # The permit names the DOMAIN half. HIBP is a third-party index and the
+    # lookup never reaches the address owner's infrastructure, but the operation
+    # is still authorised and audited like every other outbound read.
+    domain = address.split("@")[-1]
+    scope = Scope([ScopeRule(kind=ScopeKind.DOMAIN, value=domain)])
+    try:
+        permit = _gate.authorise(domain, keyed_sources.OPERATION, body.actor,
+                                 scope, kind=ScopeKind.DOMAIN)
+        answer = keyed_sources.hibp_account(permit, address)
+    except Exception as exc:                                    # noqa: BLE001
+        raise HTTPException(status_code=502,
+                            detail={"error": f"{type(exc).__name__}: {exc}"})
+
+    payload = answer.to_dict()
+    payload["address"] = address
+    payload["what_this_does_not_say"] = (
+        "That the account is compromised now, that the password is still in "
+        "use, or that anything should be revoked. It says the address appeared "
+        "in a corpus that was published on a date.")
+    return payload
+
+
+@app.get("/api/v1/identity/secrets-scanning", tags=["brand"])
+def secrets_scanning() -> Dict[str, Any]:
+    """Where exposed keys and tokens are handled, which is NOT here.
+
+    A route that returns a deliberate refusal, because the alternative is
+    somebody discovering the gap by looking for a screen that does not exist.
+
+    This portfolio already has a Secrets Scanner with its own detector corpus,
+    its own validation and its own false-positive discipline. Growing a second
+    regex corpus here would produce two products that disagree about whether a
+    string is a live credential, and the one a customer happened to open would
+    decide what they believed.
+    """
+    return {
+        "supported": False,
+        "reason": (
+            "Exposed keys and tokens are the Secrets Scanner's job. It already "
+            "has a detector corpus, validation and a false-positive discipline; "
+            "a second corpus here would drift from it, and two products "
+            "disagreeing about whether a string is a live credential is worse "
+            "than one product answering."),
+        "integration": (
+            "The intended shape is INGEST, not reimplementation: SKOPOS "
+            "correlates a secret the Secrets Scanner already found against the "
+            "externally-visible asset it was found on. That needs an export "
+            "contract from that tool, which does not exist yet."),
+        "what_skopos_does_contribute": (
+            "The external half. A leaked key matters more when it is on an "
+            "asset this product can see from the internet, and that "
+            "reachability is something only SKOPOS knows."),
+    }
+
+
 @app.get("/api/v1/compliance/controls", tags=["compliance"])
 def compliance_controls(framework: Optional[str] = None) -> Dict[str, Any]:
     """Which controls this product helps evidence, and what it does not do.
