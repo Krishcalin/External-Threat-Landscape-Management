@@ -266,13 +266,117 @@ means committed, which is the whole basis of `core/blocklists.py`'s design.
 
 ---
 
+## The TAXII pull client
+
+The last leg. SKOPOS already *served* TAXII (`core/taxii.py`) and *pushed* to
+one (`collect/opencti.py`); `collect/taxii_client.py` polls somebody else's on
+a schedule without refetching what it already holds.
+
+### The public TAXII landscape is one server
+
+Measured 2026-08-24:
+
+| Server | Result |
+|---|---|
+| `attack-taxii.mitre.org` | **live, keyless, readable** |
+| `cti-taxii.mitre.org` | dead — MITRE retired it |
+| `limo.anomali.com` | dead — the free Limo service is gone |
+| `otx.alienvault.com/taxii` | HTTP 500 |
+| `taxii.mcafee.com` | dead |
+
+Four of five are gone. That is worth knowing before anybody plans around the
+free TAXII ecosystem, and it is why `collect/stix_ingest.py` — which accepts
+any bundle from any transport — is the more durable capability.
+
+### Three ways the one working server differs from the specification
+
+All three come from MITRE, so all three are load-bearing rather than defensive
+programming.
+
+**Discovery is at the server root, not under the API root.** Requesting
+`/api/v21/taxii2/` returns `503 Not Implemented — The 'Get Status' endpoint is
+not implemented`, because under an API root that path means something else. A
+client that builds discovery by appending to the API root reads that 503 as an
+outage. Discovery is `{origin}/taxii2/`.
+
+**`api_roots` may be relative.** The specification says URLs; MITRE returns
+`["/api/v21", ...]`. A client treating those as absolute builds
+`https:///api/v21`.
+
+**`next` may be an integer.** The specification says string; MITRE returns `1`,
+then `2`. `str(1) != 1` silently ends a pagination loop after one page.
+
+### Incremental polling runs on a header, not on the objects
+
+The cursor is `X-TAXII-Date-Added-Last` — when the **server** added the object
+to the collection — not any timestamp inside the STIX. An object's `modified`
+is when its author changed it, which can be years before the server received
+it; bookkeeping on that refetches the same backlog every run and still misses
+late-arriving old objects.
+
+Measured against MITRE's ICS ATT&CK collection:
+
+| Poll | Result |
+|---|---|
+| first (cold) | 2,113 objects over 22 pages |
+| second (warm) | **0 objects over 1 page**, `incremental=True` |
+
+**The cursor advances only on success.** If a page fails to parse,
+`added_after` keeps its previous value so the next run retries that ground — a
+poller that advances past an error silently loses whatever was in the page it
+could not read, and nothing ever goes back for it.
+
+### No network in the client
+
+`collect/egress.py` opens by declaring itself "the only module in SKOPOS that
+touches the network", and binds every request to a permit for a specific estate
+asset. **A feed poll has no asset** — reading somebody's published collection
+touches nothing belonging to the estate under scan, which is why
+`cti_feed_read` is PASSIVE.
+
+So the client is a protocol driver with the transport injected, and
+`tools/refresh_intel.py` supplies it. That keeps the egress invariant intact
+and makes every branch testable against a recorded document — which matters
+when four of five servers are dead.
+
+### What a given server actually yields
+
+MITRE's ATT&CK TAXII returns `course-of-action`, `campaign` and
+`attack-pattern` and **almost no indicators**, because ATT&CK is a knowledge
+base rather than an IOC feed. That is not a defect in either system. This
+exists so an operator can point SKOPOS at a server that carries indicators — a
+partner's OpenCTI, a sector ISAC, a commercial subscription:
+
+```bash
+export SKOPOS_TAXII_SERVER=https://taxii.partner.example
+export SKOPOS_TAXII_COLLECTIONS=<id>,<id>     # empty = every readable one
+export SKOPOS_TAXII_TOKEN=<bearer>            # optional
+python tools/refresh_intel.py --only-taxii
+```
+
+`data/taxii_state.json` holds the per-collection cursor and is **gitignored**:
+it is per-deployment runtime state, and committing it would hand every clone a
+cursor from a machine that is not theirs, whose first poll would silently skip
+everything before it.
+
+### The merge does not manufacture sightings
+
+Polled indicators fold into `data/cti.json` deduplicated on
+`(value, kind, source)`, keeping the freshest `seen_on`. Two polls of a
+collection that re-serves an object must not look like two independent
+sightings — `core/cti.py:highest_weight` already refuses to stack redundant
+sources, and this refuses to create them.
+
+Running it against the existing corpus deduplicated 11,820 records to 10,965
+**without losing a single distinct indicator** — the unique key count was
+10,965 before and after.
+
+---
+
 ## What is still open
 
-- **A TAXII 2.1 *pull* client.** `collect/stix_ingest.py` consumes any bundle,
-  but something still has to fetch it on a schedule with pagination and
-  `added_after` bookkeeping. SKOPOS serves TAXII (`core/taxii.py`) and pushes to
-  it (`collect/opencti.py`); polling somebody else's is the remaining leg.
-- **Entity persistence.** `entities()` extracts them; nothing stores or queries
-  them yet, so "what is this indicator part of?" is answerable only within a
-  single bundle.
+- **Entity persistence.** `collect/stix_ingest.py:entities()` extracts actors,
+  malware and campaigns, and `fetch_taxii` collects them, but nothing stores or
+  queries them yet. "What is this indicator part of?" is answerable only within
+  a single bundle.
 - **AEV**, deferred by explicit decision.

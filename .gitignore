@@ -38,3 +38,9 @@ reports/
 
 # Output of frontend/scripts/render-check.tsx
 frontend/.render-check/
+
+# TAXII poll cursors. Per-deployment RUNTIME STATE, not a vendored corpus:
+# it records how far this installation has polled somebody else's server.
+# Committing it would hand every clone a cursor from a machine that is not
+# theirs, and the first poll would silently skip everything before it.
+data/taxii_state.json

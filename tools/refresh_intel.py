@@ -44,6 +44,7 @@ import csv
 import gzip
 import io
 import json
+import os
 import re
 import sys
 import urllib.request
@@ -653,6 +654,175 @@ def fetch_cti() -> Dict:
     }
 
 
+# ── TAXII pull (data/cti.json + data/taxii_state.json) ──────────────────────
+#: Configured in the environment, mirroring `collect/opencti.py`. A TAXII server
+#: is somebody's specific deployment — there is no sensible default, and a
+#: hard-coded one would be a URL nobody chose.
+#:
+#: `SKOPOS_TAXII_SERVER`      https://taxii.example.org
+#: `SKOPOS_TAXII_COLLECTIONS` comma-separated ids; empty means every readable one
+#: `SKOPOS_TAXII_TOKEN`       optional bearer token
+TAXII_SERVER_ENV = "SKOPOS_TAXII_SERVER"
+TAXII_COLLECTIONS_ENV = "SKOPOS_TAXII_COLLECTIONS"
+TAXII_TOKEN_ENV = "SKOPOS_TAXII_TOKEN"
+
+STATE_FILE = "taxii_state.json"
+
+
+def _taxii_fetch(token: str = ""):
+    """The transport `collect/taxii_client.py` needs, supplied here.
+
+    The client is a pure protocol driver so it stays testable without a live
+    server — which matters, because four of the five public TAXII servers
+    measured on 2026-08-24 were dead.
+    """
+    def fetch(url, headers):
+        merged = dict(headers)
+        merged["User-Agent"] = "etlm-refresh-intel/0.1 (+open-source ETLM)"
+        if token:
+            merged["Authorization"] = "Bearer " + token
+        request = urllib.request.Request(url, headers=merged)
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+            return response.read(), dict(response.headers)
+    return fetch
+
+
+def fetch_taxii(server: str = "", collections: str = "",
+                token: str = "") -> Dict:
+    """Poll a TAXII 2.1 server and turn what arrives into CTI indicators.
+
+    INCREMENTAL BY DEFAULT. Each collection's cursor is persisted in
+    data/taxii_state.json and sent as `added_after` next run, so a second poll
+    transfers what the server received since the first rather than the whole
+    collection again.
+
+    WHAT A GIVEN SERVER ACTUALLY YIELDS. Measured against MITRE's ATT&CK TAXII
+    server — the one public keyless server still running — a poll returns
+    `course-of-action`, `campaign` and `attack-pattern` objects and almost no
+    indicators, because ATT&CK is a knowledge base rather than an IOC feed.
+    That is not a defect in either system: this exists so an operator can point
+    SKOPOS at a server carrying indicators, such as a partner's OpenCTI or a
+    sector ISAC.
+    """
+    from collect import stix_ingest as _stix_ingest
+    from collect import taxii_client as tc
+
+    base = server or os.environ.get(TAXII_SERVER_ENV, "")
+    if not base:
+        raise RuntimeError(
+            "No TAXII server configured. Set " + TAXII_SERVER_ENV +
+            " (and optionally " + TAXII_COLLECTIONS_ENV + " / " +
+            TAXII_TOKEN_ENV + ").")
+    wanted = {c.strip() for c in
+              (collections or os.environ.get(TAXII_COLLECTIONS_ENV, "")).split(",")
+              if c.strip()}
+    key = token or os.environ.get(TAXII_TOKEN_ENV, "")
+    fetch = _taxii_fetch(key)
+
+    previous: Dict = {}
+    state_path = DATA / STATE_FILE
+    if state_path.exists():
+        try:
+            with state_path.open("r", encoding="utf-8") as handle:
+                previous = json.load(handle)
+        except (OSError, ValueError):
+            previous = {}
+    states = tc.load_state(previous)
+
+    body, _ = fetch(tc.discovery_url(base), {"Accept": tc.MEDIA_TYPE})
+    server_info = tc.parse_discovery(body, base)
+    api_root = server_info.preferred
+    body, _ = fetch(tc.collections_url(api_root), {"Accept": tc.MEDIA_TYPE})
+    available = [c for c in tc.parse_collections(body) if c.readable]
+    chosen = [c for c in available if not wanted or c.id in wanted]
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    indicators: List[Dict] = []
+    entities: List[Dict] = []
+    reports: Dict[str, Any] = {}
+    updated: List = []
+
+    for collection in chosen:
+        state = states.get(api_root + "|" + collection.id) or tc.PollState(
+            server=base, api_root=api_root, collection=collection.id)
+        objects, advanced, report = tc.poll(fetch, state, now=today)
+        updated.append(advanced)
+
+        bundle = {"type": "bundle", "id": "bundle--" + collection.id,
+                  "objects": objects}
+        label = collection.title or collection.id
+        try:
+            found, parsed = _stix_ingest.parse_bundle(
+                bundle, source="taxii", publisher=server_info.title or base)
+            indicators.extend(found)
+            entities.extend(_stix_ingest.entities(bundle))
+            reports[label] = dict(report.to_dict(), ingest=parsed.to_dict())
+        except _stix_ingest.BundleMalformed as exc:
+            reports[label] = dict(report.to_dict(),
+                                  ingest_error=str(exc)[:200])
+
+    seen_keys = {u.key for u in updated}
+    for state in states.values():
+        if state.key not in seen_keys:
+            updated.append(state)
+    write(DATA / STATE_FILE, tc.dump_state(updated, built_on=today))
+
+    return {
+        "_meta": {
+            "built_on": today,
+            "server": base,
+            "api_root": api_root,
+            "collections_polled": [c.title or c.id for c in chosen],
+            "indicators": len(indicators),
+            "entities": len(entities),
+            "reports": reports,
+        },
+        "indicators": indicators,
+        "entities": entities,
+    }
+
+
+def merge_into_cti(polled: Dict) -> Dict:
+    """Fold TAXII-polled indicators into the vendored CTI corpus.
+
+    Deduplicated on (value, kind, source), keeping the FRESHEST `seen_on`. Two
+    polls of a collection that re-serves an object must not make it look like
+    two independent sightings — `core/cti.py:highest_weight` already refuses to
+    stack redundant sources, and this refuses to manufacture them.
+    """
+    existing: Dict = {}
+    path = DATA / "cti.json"
+    if path.exists():
+        with path.open("r", encoding="utf-8") as handle:
+            existing = json.load(handle)
+
+    merged: Dict[Any, Dict] = {}
+    incoming = (list(existing.get("indicators") or [])
+                + list(polled.get("indicators") or []))
+    for item in incoming:
+        key = (str(item.get("value", "")).lower(), item.get("kind"),
+               item.get("source"))
+        current = merged.get(key)
+        if current is None or str(item.get("seen_on", "")) > str(
+                current.get("seen_on", "")):
+            merged[key] = item
+
+    indicators = list(merged.values())
+    by_source: Dict[str, int] = {}
+    for item in indicators:
+        name = str(item.get("source") or "")
+        by_source[name] = by_source.get(name, 0) + 1
+
+    meta = dict(existing.get("_meta") or {})
+    meta.update({
+        "built_on": datetime.now(timezone.utc).date().isoformat(),
+        "indicators": len(indicators),
+        "by_source": dict(sorted(by_source.items())),
+        "taxii": polled.get("_meta", {}),
+    })
+    return {"_meta": meta, "indicators": indicators}
+
+
 def fetch_leaksites() -> Dict:
     """Vendor the ransomware leak-site victim index.
 
@@ -760,6 +930,12 @@ def main(argv=None) -> int:
                              "corpus (CIRCL MISP feed, ThreatFox, "
                              "MalwareBazaar). Every other corpus is left "
                              "byte-identical")
+    parser.add_argument("--only-taxii", action="store_true",
+                        help="poll the configured TAXII 2.1 server "
+                             "(SKOPOS_TAXII_SERVER) and merge what it "
+                             "returns into data/cti.json. Incremental: "
+                             "the per-collection cursor lives in "
+                             "data/taxii_state.json")
     parser.add_argument("--only-leaksites", action="store_true",
                         help="refresh ONLY data/leaksites.json — the public "
                              "ransomware leak-site victim index")
@@ -785,6 +961,29 @@ def main(argv=None) -> int:
         print(f"  {meta['indicators']:,} indicators  {meta['by_source']}")
         for source, why in (meta.get("notes") or {}).items():
             print(f"  ! {source}: {why}")
+        return 0
+
+    if args.only_taxii:
+        try:
+            polled = fetch_taxii()
+        except Exception as exc:                              # noqa: BLE001
+            print("TAXII poll failed: " + str(exc))
+            return 1
+        meta = polled["_meta"]
+        print("Polled " + meta["server"] + " (" + meta["api_root"] + ")")
+        for name, report in (meta.get("reports") or {}).items():
+            ingest = report.get("ingest") or {}
+            print(f"  {name}: {report['objects']} objects over "
+                  f"{report['pages']} page(s), "
+                  f"incremental={report['incremental']} -> "
+                  f"{ingest.get('kept', 0)} indicators")
+            for flag in ("stopped_by_page_cap", "stopped_by_object_cap",
+                         "stopped_by_stalled_cursor"):
+                if report.get(flag):
+                    print("    ! " + flag)
+            if report.get("error"):
+                print("    ! error: " + str(report["error"]))
+        write(DATA / "cti.json", merge_into_cti(polled))
         return 0
 
     if args.only_leaksites:

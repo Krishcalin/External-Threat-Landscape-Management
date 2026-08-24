@@ -25,6 +25,23 @@ while true; do
   echo "[skopos-scheduler] $(date -u +%Y-%m-%dT%H:%M:%SZ) resolve_forecasts"
   python -u tools/resolve_forecasts.py || echo "[skopos-scheduler] resolve_forecasts FAILED ($?)"
 
+  # THE INTEL CORPUS. `core/cti.py` raises `cti.stale_corpus` once the corpus
+  # is 14 days old, because past that a result of "no sightings" reflects the
+  # corpus age as much as the estate. Refreshing daily keeps that finding from
+  # ever being the honest answer.
+  echo "[skopos-scheduler] $(date -u +%Y-%m-%dT%H:%M:%SZ) refresh_cti"
+  python -u tools/refresh_intel.py --only-cti || echo "[skopos-scheduler] refresh_cti FAILED ($?)"
+
+  # A TAXII server, if one is configured. Skipped ALOUD rather than silently:
+  # an operator who set the variable and sees nothing has no way to tell a
+  # working poll from a typo in the name.
+  if [ -n "${SKOPOS_TAXII_SERVER:-}" ]; then
+    echo "[skopos-scheduler] $(date -u +%Y-%m-%dT%H:%M:%SZ) poll_taxii ${SKOPOS_TAXII_SERVER}"
+    python -u tools/refresh_intel.py --only-taxii || echo "[skopos-scheduler] poll_taxii FAILED ($?)"
+  else
+    echo "[skopos-scheduler] poll_taxii skipped — SKOPOS_TAXII_SERVER is unset"
+  fi
+
   # The estate itself. Inert unless SKOPOS_SCAN_INVENTORY names something, and
   # it says so rather than exiting quietly — a scheduler with no inventory is a
   # misconfiguration, not an estate with nothing in it.
