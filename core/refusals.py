@@ -181,8 +181,11 @@ GAPS: Sequence[str] = (
     "Geopolitical intelligence — an analyst organisation, not software.",
     "Identity intelligence at scale. Domain-level breach exposure is planned; "
     "monitoring a million external identities is not.",
-    "Multi-tenant SaaS. Row-level security is built and proven, but an "
-    "organisation can still only be created by hand in the database.",
+    "Multi-tenant SaaS. Row-level security is built and proven and a tenant "
+    "can now be provisioned whole — `tools/provision_org.py`. What is still "
+    "absent is everything around it: self-service signup, billing, and a "
+    "control plane. Provisioning is an operator running a command, which is "
+    "a product with tenants rather than a SaaS.",
 )
 
 BY_ID: Dict[str, Refusal] = {r.id: r for r in REFUSALS}

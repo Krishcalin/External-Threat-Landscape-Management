@@ -278,8 +278,20 @@ have not been built, not because they were declined:
 - **Geopolitical intelligence.** An analyst organisation, not software.
 - **Identity intelligence at scale.** Domain-level breach exposure is planned;
   monitoring a million external identities is not.
-- **Multi-tenant SaaS.** Row-level security is built and proven, but an
-  organisation can still only be created by hand in the database.
+- **Multi-tenant SaaS.** Row-level security is built and proven, and a tenant
+  can now be provisioned whole — `tools/provision_org.py` creates the
+  organisation and its first administrator in one transaction. What remains
+  absent is everything *around* that: self-service signup, billing, a control
+  plane. Provisioning is an operator running a command, which makes this a
+  product with tenants rather than a SaaS.
+
+  Organisation creation is deliberately **not** an API endpoint. Every
+  authenticated caller acts for exactly one organisation, so no principal in
+  the system holds that authority: an admin of one tenant creating another
+  would be a platform operator, and an admin of the new tenant cannot
+  authorise its own creation because it does not exist yet. Inventing a
+  cross-tenant role to resolve that would add the standing all-tenant
+  privilege row-level security exists to avoid.
 
 ---
 

@@ -221,7 +221,12 @@ def test_forecasts_and_epss_round_trip_through_postgres():
         assert store.record([row]) == 1
         assert store.record([row]) == 0, "the same pairing must not double-count"
 
-        back = store.all_forecasts("teps-1.0.0")
+        # The LIVE version, not a literal. `from_finding` stamps whatever
+        # core/scoring.py currently produces, so a hardcoded version here
+        # queries for rows the fixture never wrote — which is exactly what
+        # happened when P9 moved the model to teps-1.1.0. It went unnoticed
+        # because this test only runs against a live database.
+        back = store.all_forecasts(row.model_version)
         assert len(back) == 1
         assert back[0].inputs["adversary_interest"] == pytest.approx(0.15)
 
