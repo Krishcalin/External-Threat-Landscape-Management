@@ -82,6 +82,72 @@ def _sco_id(kind: str, properties: Dict[str, Any]) -> str:
     return f"{kind}--{uuid.uuid5(SCO_NAMESPACE, canonical)}"
 
 
+#: SSVC decision points, as published by CISA-ADP in the `vulnrichment` ADP
+#: container. SKOPOS vendors 1,674 of them.
+#:
+#: WHY LABELS AND NOT A CUSTOM PROPERTY. OpenCTI has no SSVC field anywhere in
+#: its schema — issue #17045 requests one, citing CISA BOD 26-04 — and whether
+#: it preserves arbitrary `x_`-prefixed properties on STIX import is UNVERIFIED.
+#: A custom property that silently drops would lose the one ranking input this
+#: product carries that nothing else in the open-source field does. Labels are
+#: a standard STIX property, survive any conformant importer, and are filterable
+#: without parsing prose.
+SSVC_POINTS = ("exploitation", "automatable", "technical_impact")
+
+#: The fourth decision point, and the reason no outcome is computed here.
+SSVC_MISSING_INPUT = "mission_and_wellbeing"
+
+SSVC_NO_OUTCOME = (
+    "SSVC decision POINTS are exported; the SSVC OUTCOME (Act / Attend / "
+    "Track* / Track) is not, and cannot be. The decision tree takes four "
+    "inputs and CISA publishes three: Exploitation, Automatable and Technical "
+    "Impact. The fourth, MISSION AND WELL-BEING, is a judgement about what the "
+    "affected system is worth to the organisation that runs it — which an "
+    "outside-in product does not know and must not guess. Supply it yourself "
+    "and the outcome follows; a producer that shipped one would be inventing "
+    "the input it was missing.")
+
+
+def ssvc_labels(points: Optional[Dict[str, Any]]) -> List[str]:
+    """SSVC decision points as STIX labels: `ssvc:exploitation/active`.
+
+    Namespaced under `ssvc:` so a consumer can select them without knowing
+    anything about SKOPOS, and the value follows a `/` so it parses without
+    ambiguity — a point's value can contain a hyphen but never a slash.
+    """
+    if not points:
+        return []
+    out = []
+    for name in SSVC_POINTS:
+        value = str(points.get(name) or "").strip().lower()
+        if value:
+            out.append(f"ssvc:{name.replace('_', '-')}/{value}")
+    return sorted(out)
+
+
+def ssvc_from_evidence(evidence: Sequence[str]) -> Dict[str, str]:
+    """Recover decision points from the evidence line the engine already writes.
+
+    `core/engine.py` renders them as `CISA SSVC: automatable=no, exploitation=
+    active, technical impact=total` — a sentence for a human. Parsing it back is
+    less pleasant than threading a dict through, and it is what keeps this
+    change to the export rather than to the scoring path, which has its own
+    tests and its own reasons for its shape.
+    """
+    for line in evidence or ():
+        text = str(line)
+        if not text.upper().startswith("CISA SSVC:"):
+            continue
+        points: Dict[str, str] = {}
+        for chunk in text.split(":", 1)[1].split(","):
+            if "=" not in chunk:
+                continue
+            key, _, value = chunk.partition("=")
+            points[key.strip().replace(" ", "_")] = value.strip()
+        return points
+    return {}
+
+
 def domain_name(value: str) -> Dict[str, Any]:
     """A hostname as `domain-name`, deliberately not `hostname`.
 
@@ -285,10 +351,17 @@ def observation_note(rule_id: str, detail: str, object_refs: Sequence[str],
 
 
 def vulnerability(cve: str, name: str = "", description: str = "",
+                  created: Optional[str] = None,
+                  ssvc: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """A CVE, carrying SSVC decision points as labels where CISA published them.
 
-
-                  created: Optional[str] = None) -> Dict[str, Any]:
-    return {
+    The labels are the point of this object beyond the CVE id. OpenCTI already
+    has native `x_opencti_cisa_kev` and `x_opencti_epss_score` fields, so KEV
+    and EPSS arrive there by other routes; SSVC has no field anywhere in its
+    schema and no other open-source producer emits it.
+    """
+    labels = ssvc_labels(ssvc)
+    obj = {
         "type": "vulnerability",
         "spec_version": SPEC_VERSION,
         "id": _id("vulnerability", cve),
@@ -303,6 +376,17 @@ def vulnerability(cve: str, name: str = "", description: str = "",
              "description": "Listed as known exploited by CISA."},
         ],
     }
+    if labels:
+        obj["labels"] = labels
+        # Carried in the custom property too, because a label is a flat string
+        # and a consumer that wants the points as fields should not have to
+        # parse them back. Belt and braces: if `x_` survives, both work; if it
+        # does not, the labels still do.
+        obj["x_skopos_ssvc"] = {k: v for k, v in (ssvc or {}).items()
+                                if k in SSVC_POINTS}
+        obj["x_skopos_ssvc_outcome"] = None
+        obj["x_skopos_ssvc_note"] = SSVC_NO_OUTCOME
+    return obj
 
 
 def infrastructure(asset: str, product: str = "",
@@ -411,7 +495,8 @@ BUNDLE_CAVEAT = (
     "exploited-vulnerability catalogue carries no comparable version data at "
     "all — heavily weighted toward older CVEs, whose publishers described "
     "affected versions in prose — so many of these can never become "
-    "determinations however much data is ingested."
+    "determinations however much data is ingested. "
+    + SSVC_NO_OUTCOME
 )
 
 
@@ -665,9 +750,13 @@ def bundle(findings: Iterable[Dict[str, Any]],
                 objects.append(belongs_to(infra["id"], identity["id"],
                                           verified, stamp))
         if ("vuln", cve) not in seen:
+            # An explicit `ssvc` key wins; otherwise recover the points from
+            # the evidence line the engine already renders for humans.
+            points = (finding.get("ssvc")
+                      or ssvc_from_evidence(finding.get("evidence") or ()))
             objects.append(vulnerability(cve, str(finding.get("vulnerability") or ""),
                                          str(finding.get("required_action") or ""),
-                                         stamp))
+                                         stamp, ssvc=points))
             seen.add(("vuln", cve))
         objects.append(relationship(finding, stamp))
 
@@ -697,6 +786,7 @@ __all__ = ["SPEC_VERSION", "NAMESPACE", "SCO_NAMESPACE", "BUNDLE_CAVEAT",
            "bundle", "exposure_bundle", "to_json",
            "domain_name", "ip_address", "software", "autonomous_system",
            "x509_certificate", "organization", "composed_of", "belongs_to",
-           "resolves_to", "observation_note",
+           "resolves_to", "observation_note", "ssvc_labels",
+           "ssvc_from_evidence", "SSVC_POINTS", "SSVC_NO_OUTCOME",
            "vulnerability", "infrastructure", "relationship", "note",
            "CONFIDENCE_DETERMINATION", "CONFIDENCE_WORKLIST"]
