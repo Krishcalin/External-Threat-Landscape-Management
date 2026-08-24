@@ -23,6 +23,7 @@ Where the distinction matters it is marked.
 1. [Threat actor attribution](#1-threat-actor-attribution)
 2. [A single risk score](#2-a-single-risk-score)
 3. [Dark web collection](#3-dark-web-collection)
+3a. [Validating that an exposure is exploitable](#3a-validating-that-an-exposure-is-exploitable)
 4. [Confirming a subdomain takeover](#4-confirming-a-subdomain-takeover)
 5. [Starting a regulatory clock](#5-starting-a-regulatory-clock)
 6. [Declaring critical infrastructure](#6-declaring-critical-infrastructure)
@@ -105,6 +106,39 @@ it is not going to close.
 
 > Enforced by: the egress allowlist, and the absence of any credential handling
 > in `collect/`.
+
+---
+
+## 3a. Validating that an exposure is exploitable
+
+**Refused on governance grounds. Use OpenAEV.**
+
+Adversarial Exposure Validation platforms — Filigran's **OpenAEV**, Pentera,
+Cymulate, Picus — execute real payloads against real endpoints and report
+whether your controls caught them. Gartner merged breach-and-attack simulation
+and automated penetration testing into this category in 2025, and its own market
+page states the merger verbatim.
+
+`core/gate.py` classifies **`exploit_attempt`** and **`credential_replay`** as
+`PROHIBITED` unconditionally under FR-GOV-007 — refused before scope or
+ownership are consulted, so the refusal cannot be argued with by adding a scope
+rule.
+
+SKOPOS establishes that an asset runs a product with an exploited
+vulnerability. It does not and will not establish that an attack would succeed.
+
+**The alternative is named, and it is free.** OpenAEV is open source under
+Apache 2.0 and covers exactly the CTEM validation stage SKOPOS declines.
+`GET /api/v1/export/validation-targets` produces the asset list to point it at —
+ordered by what is worth *testing*, which is a different question from what is
+worth fixing.
+
+That list deliberately carries **no ATT&CK techniques**. SKOPOS holds none:
+see §1. A validation platform already knows the techniques from MITRE's own
+data; what it cannot know, and this supplies, is which of your assets are
+externally reachable and what they appear to run.
+
+> Recorded on: `core/validation.py` · enforced by: `core/gate.py`.
 
 ---
 

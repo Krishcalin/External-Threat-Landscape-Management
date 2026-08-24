@@ -4,8 +4,10 @@
 
 <p align="center">
   <strong>An open-source External Threat Landscape Management platform.</strong><br>
-  It continuously connects what your organisation exposes to the internet with
-  what adversaries are actively exploiting, and drives accountable remediation.
+  It discovers what your organisation exposes to the internet, proves you own it
+  before touching it, and joins it to what adversaries are actively exploiting —
+  recording every step in a hash-chained audit log, and publishing its own
+  forecast accuracy.
 </p>
 
 <p align="center">
@@ -381,6 +383,30 @@ together is a takeover** — that is true of every system where one person can d
 both, it is not preventable while they can, and SKOPOS says so on the screen
 instead of implying otherwise. Every account action is written to the
 hash-chained audit log; no issued password ever is.
+
+**What is actually rare here, stated precisely.** Joining an estate to
+actively-exploited vulnerabilities is table stakes: `nuclei-templates` ships
+**1,496 KEV templates** carrying `epss-score` in every CVE template,
+ProjectDiscovery's `vulnx` filters on `is_kev:true` and `epss_score:>0.8`, and
+OpenCTI has native `x_opencti_cisa_kev` and `x_opencti_epss_score` fields. Any
+claim that KEV-plus-EPSS prioritisation is a differentiator does not survive one
+knowledgeable reviewer, and SKOPOS does not make it.
+
+Five things do survive, and they are only interesting together:
+
+| | |
+|---|---|
+| **Ownership-gated collection** | Active operations fail closed against an unverified asset. No open-source discovery tool implements ownership proof — what the field has is *scope control* (BBOT's topological distance, sn0int's Autonoscope, theHarvester's activity tiers), which is a different thing |
+| **A hash-chained audit log** | Of every action, under whose authority. Audit logging is an Enterprise-only feature in both OpenCTI and OpenAEV |
+| **SSVC decision points** | Absent from every open-source discovery tool, absent from `cvemap`, and absent from OpenCTI's schema entirely — issue #17045 requests it. Sourced from CISA-ADP's `vulnrichment`, exported as standard STIX labels |
+| **A stated determinability ceiling** | 47.5%, measured over the full corpus and printed on every run. Nothing else in this category publishes one |
+| **A published forecast accuracy record** | `core/backtest.py` scores this product's own predictions against outcomes. No competitor, open or commercial, publishes anything comparable |
+
+**Two things this README used to lead with and no longer does.** *Continuous
+monitoring* is implemented free by reconFTW, reNgine, OWASP Nettacker and
+Findomain. *Dangling-DNS and takeover detection* is commodity — BadDNS carries
+129 signatures across eleven record types and ships inside BBOT. Both remain
+worth having; neither is worth leading with.
 
 **Three of the four paid feeds were replaced, and the fourth was kept because it
 costs $42 a year.** Measured rather than assumed, on 2026-08-22/23:

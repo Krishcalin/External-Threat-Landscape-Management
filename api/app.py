@@ -803,6 +803,44 @@ def _exposure_rows(limit: int = 500):
     return rows, {"dns": bool(addresses), "takeover": bool(takeovers)}
 
 
+@app.get("/api/v1/export/validation-targets", tags=["export"])
+def export_validation_targets(limit: int = Query(200, ge=1, le=1000),
+                              run: Optional[int] = None) -> Dict[str, Any]:
+    """What to point an adversarial-exposure-validation platform at.
+
+    SKOPOS refuses the CTEM validation stage outright — `exploit_attempt` is
+    PROHIBITED in core/gate.py under FR-GOV-007 — so this is the handoff to a
+    platform that does cover it: OpenAEV, which is open source and Apache 2.0,
+    or a commercial equivalent.
+
+    It carries NO ATT&CK TECHNIQUES, because SKOPOS holds none. What it carries
+    is the thing a validation platform cannot know for itself: which of your
+    assets are externally reachable, what they appear to run, and which findings
+    are unresolved worklist entries where a simulation resolves the question
+    faster than a human reading a banner.
+    """
+    from core import findings_store as _fs
+    from core import validation as _validation
+
+    try:
+        store = _fs.open_findings_store()
+        rows = store.findings(run_id=run, limit=2000)
+    except Exception as exc:                                    # noqa: BLE001
+        raise HTTPException(status_code=503, detail={
+            "error": f"{type(exc).__name__}: {exc}",
+            "why": "no findings store is reachable, so there is no target list "
+                   "to produce. That is not an empty estate."})
+
+    payload = _validation.targets(rows, limit=limit)
+    payload["coverage_gaps"] = _validation.coverage_gaps(rows)
+    payload["gaps_are_not_omissions"] = (
+        "Coverage gaps are listed rather than dropped. A target list that "
+        "silently omitted what it could not assess would read as an estate "
+        "with nothing else in it — the same reason OpenCTI generates "
+        "placeholder injects for coverage it cannot test.")
+    return payload
+
+
 @app.get("/api/v1/export/stix/exposure", tags=["export"])
 def export_exposure_stix(limit: int = Query(500, ge=1, le=2000)
                          ) -> Dict[str, Any]:

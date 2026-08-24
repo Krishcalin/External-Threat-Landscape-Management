@@ -85,6 +85,23 @@ REFUSALS: Sequence[Refusal] = (
         "— is a real gap that is not going to close.",
         "collect/leaksites.py"),
     Refusal(
+        "control_validation", "Validating that an exposure is exploitable",
+        Ground.GOVERNANCE,
+        "Adversarial Exposure Validation platforms — Filigran's OpenAEV, "
+        "Pentera, Cymulate, Picus — execute real payloads against real "
+        "endpoints and report whether your controls caught them. Gartner "
+        "merged breach-and-attack simulation and automated pentesting into "
+        "this category in 2025.",
+        "core/gate.py classifies `exploit_attempt` and `credential_replay` as "
+        "PROHIBITED unconditionally under FR-GOV-007, before scope or "
+        "ownership are consulted. SKOPOS establishes that an asset runs a "
+        "product with an exploited vulnerability; it does not and will not "
+        "establish that an attack would succeed. USE OPENAEV FOR THIS — it is "
+        "open source, Apache 2.0, and covers the CTEM validation stage SKOPOS "
+        "deliberately does not. `/api/v1/export/validation-targets` produces "
+        "the asset list to point it at.",
+        "core/gate.py"),
+    Refusal(
         "takeover_confirmation", "Confirming a subdomain takeover",
         Ground.CAPABILITY,
         "Scanners routinely report a dangling record as 'vulnerable to "
