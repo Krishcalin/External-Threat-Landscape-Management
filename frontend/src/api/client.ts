@@ -3,7 +3,7 @@ import type { RuleCatalogue, RefusalRegister, Accuracy, AlertsView, CertInStatus
               ChangesView, IntelStatus, LatencyReport, RunsPage, Summary,
               BreachReport, ExposureGraph, LookalikeReport,
               LookupResult, SourceCatalogue,
-              SeedKindCatalogue, SeedPlan,
+              SeedKindCatalogue, SeedPlan, LandscapeRun,
               SupplierRegister, Tenancy } from './types'
 
 /** Relative paths only: the built bundle carries no origin, so it can be served
@@ -134,6 +134,28 @@ export async function landscapePlan(
     throw new ApiError(response.status, message)
   }
   return response.json() as Promise<SeedPlan>
+}
+
+/** The run. Separate from the plan because it contacts third parties, and an
+ *  operator should see what a seed can answer before it is asked. */
+export async function landscapeRun(
+  seeds: { value: string; kind: string }[], actor: string,
+) {
+  const response = await fetch('/api/v1/landscape/run', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ seeds, actor }),
+  })
+  if (!response.ok) {
+    let detail: unknown = response.statusText
+    try { detail = (await response.json()).detail } catch { /* keep status */ }
+    const message = typeof detail === 'string'
+      ? detail
+      : (detail as { error?: string })?.error ?? response.statusText
+    throw new ApiError(response.status, message)
+  }
+  return response.json() as Promise<LandscapeRun>
 }
 
 /* ── brand and identity exposure ───────────────────────────────────────────

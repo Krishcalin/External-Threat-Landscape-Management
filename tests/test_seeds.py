@@ -230,3 +230,112 @@ def test_both_routes_are_registered():
     paths = {r.path for r in api_app.app.routes}
     assert "/api/v1/landscape/plan" in paths
     assert "/api/v1/landscape/seed-kinds" in paths
+
+
+# ── the run, and the honesty of what it could not do ────────────────────────
+def _client():
+    from fastapi.testclient import TestClient
+
+    from api import app as api_app
+    return TestClient(api_app.app)
+
+
+def test_an_organisation_seed_reports_the_source_as_down_not_as_empty():
+    """crt.sh is the only keyless source that can search BY organisation, and
+    it answered 502 on three attempts on 2026-08-24 — `collect/ct.py` records
+    the same outage. CertSpotter, which is answering, indexes by domain and
+    cannot answer this question at all.
+
+    So an empty candidate list would read as "nobody matched" when the truth is
+    "nothing was asked", which is the substitution this codebase exists to
+    refuse.
+    """
+    body = _client().post("/api/v1/landscape/run", json={
+        "actor": "tester",
+        "seeds": [{"value": "Acme Corporation", "kind": "organisation"}]}).json()
+    unavailable = body["outcomes"][0]["unavailable"]
+    assert len(unavailable) == 1
+    assert "502" in unavailable[0]["why"]
+    assert "NOT a finding that no organisation matches" in unavailable[0]["cost"]
+
+
+def test_an_email_seed_says_which_precondition_is_missing():
+    """"Unavailable" with no reason sends somebody to buy a key they may
+    already have."""
+    body = _client().post("/api/v1/landscape/run", json={
+        "actor": "tester",
+        "seeds": [{"value": "a@example.com", "kind": "email"}]}).json()
+    why = body["outcomes"][0]["unavailable"][0]["why"]
+    assert "ownership verification" in why
+
+
+def test_the_run_never_echoes_a_mailbox():
+    response = _client().post("/api/v1/landscape/run", json={
+        "actor": "tester",
+        "seeds": [{"value": "jane.doe@somename.com", "kind": "email"}]})
+    assert "jane" not in response.text.lower()
+
+
+def test_the_run_requires_an_actor():
+    assert _client().post("/api/v1/landscape/run", json={
+        "actor": "", "seeds": [{"value": "a@b.example", "kind": "email"}]}
+    ).status_code == 400
+
+
+def test_the_landscape_states_it_is_a_floor_not_a_census():
+    """An operator reading an asset count as "this is my estate" has been
+    misled by a number rather than by a sentence."""
+    body = _client().post("/api/v1/landscape/run", json={
+        "actor": "tester",
+        "seeds": [{"value": "Acme", "kind": "organisation"}]}).json()
+    assert "FLOOR, NEVER A CENSUS" in body["landscape"]["coverage_means"]
+
+
+def test_a_failed_seed_is_a_result_rather_than_a_failed_request():
+    """One unreachable source must not discard the work done for the others."""
+    outcome = seeds.Outcome(
+        seed=seeds.parse_seed("example.com", K.DOMAIN), error="boom")
+    combined = seeds.combine([outcome])
+    assert combined["failed_seeds"] == [{"seed": "example.com", "why": "boom"}]
+    assert any("not a landscape where they were clean" in n
+               for n in combined["notes"])
+
+
+def test_the_run_cap_is_announced_rather_than_applied_quietly():
+    combined = seeds.combine([], dropped_by_cap=3)
+    assert combined["dropped_by_cap"] == 3
+    assert any("were not attempted" in n for n in combined["notes"])
+
+
+def test_assets_are_deduplicated_across_seeds():
+    a = seeds.Outcome(seed=seeds.parse_seed("example.com", K.DOMAIN),
+                      assets=("example.com", "www.example.com"))
+    b = seeds.Outcome(seed=seeds.parse_seed("other.example", K.DOMAIN),
+                      assets=("WWW.EXAMPLE.COM", "other.example"))
+    combined = seeds.combine([a, b])
+    assert combined["asset_count"] == 3
+
+
+def test_what_you_supplied_is_not_counted_as_discovered():
+    """The discovered count is the one an operator reads as "things I did not
+    know about", so counting the seed in it would inflate exactly the number
+    that matters."""
+    outcome = seeds.Outcome(seed=seeds.parse_seed("example.com", K.DOMAIN),
+                            assets=("example.com", "www.example.com"))
+    combined = seeds.combine([outcome])
+    assert combined["discovered"] == ["www.example.com"]
+
+
+def test_an_expanding_seed_that_found_nothing_says_why():
+    """CT only holds names a CA has issued for, so a domain with no public
+    certificates expands to nothing — a fact about the certificate record, not
+    about the estate."""
+    outcome = seeds.Outcome(seed=seeds.parse_seed("example.com", K.DOMAIN),
+                            assets=("example.com",))
+    assert any("fact about the certificate record" in n
+               for n in seeds.combine([outcome])["notes"])
+
+
+def test_the_run_route_is_registered():
+    from api import app as api_app
+    assert "/api/v1/landscape/run" in {r.path for r in api_app.app.routes}

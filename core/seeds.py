@@ -309,3 +309,115 @@ def summarise(seeds: Sequence[Seed]) -> Dict[str, Any]:
         "notes": notes,
         "passive_only": _lookup.PASSIVE_ONLY,
     }
+
+
+# ── assembling a landscape from per-seed outcomes ───────────────────────────
+#: Seeds contacted in one run. Each one performs several outbound lookups, so
+#: this is a wall-clock bound as much as a politeness one.
+#:
+#: REPORTED, never applied quietly — `core/validation.py` and `core/itsm.py`
+#: announce their caps for the same reason: a truncated result that does not
+#: say it was truncated reads as a complete one.
+MAX_SEEDS_PER_RUN = 12
+
+
+@dataclass
+class Outcome:
+    """What one seed produced, or why it produced nothing.
+
+    A FAILED SEED IS A RESULT, not an exception. One unreachable source must
+    not discard the work done for every other seed — and a landscape that
+    silently omits the seed that failed is indistinguishable from one where
+    that seed found nothing.
+    """
+
+    seed: "Seed"
+    assets: Tuple[str, ...] = ()
+    candidates: Tuple[Dict[str, Any], ...] = ()
+    findings: Tuple[Dict[str, Any], ...] = ()
+    #: Sources consulted that could not answer, each with what its absence
+    #: costs. Never dropped: a result missing a source reads as a clean one.
+    unavailable: Tuple[Dict[str, Any], ...] = ()
+    error: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "seed": self.seed.to_dict(),
+            "assets": list(self.assets),
+            "discovered": max(0, len(self.assets) - (1 if self.seed.expands else 0)),
+            "candidates": [dict(c) for c in self.candidates],
+            "findings": [dict(f) for f in self.findings],
+            "unavailable": [dict(u) for u in self.unavailable],
+            "error": self.error or None,
+        }
+
+
+def combine(outcomes: Sequence[Outcome],
+            dropped_by_cap: int = 0) -> Dict[str, Any]:
+    """Per-seed outcomes into one landscape, with its own limits attached.
+
+    THE COVERAGE STATEMENT IS THE POINT. An estate view assembled from passive
+    sources is a floor, never a census: it contains what the seeds could reach,
+    and an operator reading it as "this is my estate" has been misled by a
+    number rather than by a sentence.
+    """
+    assets: List[str] = []
+    seen = set()
+    candidates: List[Dict[str, Any]] = []
+    findings: List[Dict[str, Any]] = []
+    unavailable: List[Dict[str, Any]] = []
+    failed: List[Dict[str, str]] = []
+
+    for outcome in outcomes:
+        for asset in outcome.assets:
+            key = asset.lower()
+            if key not in seen:
+                seen.add(key)
+                assets.append(asset)
+        candidates.extend(dict(c) for c in outcome.candidates)
+        findings.extend(dict(f) for f in outcome.findings)
+        for item in outcome.unavailable:
+            if item not in unavailable:
+                unavailable.append(dict(item))
+        if outcome.error:
+            failed.append({"seed": outcome.seed.value, "why": outcome.error})
+
+    supplied = {s.seed.value.lower() for s in outcomes}
+    discovered = [a for a in assets if a.lower() not in supplied]
+
+    notes: List[str] = []
+    if dropped_by_cap:
+        notes.append(
+            f"{dropped_by_cap} seed(s) were not run: this stops at "
+            f"{MAX_SEEDS_PER_RUN} per run. Run the rest separately — they were "
+            "not judged uninteresting, they were not attempted.")
+    if failed:
+        notes.append(
+            f"{len(failed)} seed(s) failed and contributed nothing. A "
+            "landscape missing them is not a landscape where they were clean.")
+    if not discovered and any(o.seed.expands for o in outcomes):
+        notes.append(
+            "No assets were discovered beyond what you supplied. Certificate "
+            "transparency only holds names a CA has issued for, so a domain "
+            "with no public certificates expands to nothing — which is a fact "
+            "about the certificate record, not about the estate.")
+
+    return {
+        "assets": assets,
+        "asset_count": len(assets),
+        "discovered": discovered,
+        "discovered_count": len(discovered),
+        "candidates": candidates,
+        "findings": findings,
+        "unavailable": unavailable,
+        "failed_seeds": failed,
+        "dropped_by_cap": dropped_by_cap,
+        "notes": notes,
+        "coverage_means": (
+            "A FLOOR, NEVER A CENSUS. This is what the seeds you supplied "
+            "could reach through passive sources. Certificate transparency "
+            "finds names a CA issued for; passive DNS finds names somebody "
+            "else resolved. Neither enumerates an estate, and an asset absent "
+            "here has not been shown not to exist."),
+        "passive_only": _lookup.PASSIVE_ONLY,
+    }

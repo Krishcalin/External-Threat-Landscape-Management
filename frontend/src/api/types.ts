@@ -775,3 +775,31 @@ export interface SeedRow {
   kind: string
   value: string
 }
+
+export interface SeedOutcome {
+  seed: Seed
+  assets: string[]
+  discovered: number
+  candidates: Record<string, unknown>[]
+  findings: Record<string, unknown>[]
+  unavailable: { source: string; why: string; cost: string; terms?: string }[]
+  error: string | null
+}
+
+export interface LandscapeRun extends SeedPlan {
+  outcomes: SeedOutcome[]
+  landscape: {
+    assets: string[]
+    asset_count: number
+    discovered: string[]
+    discovered_count: number
+    candidates: Record<string, unknown>[]
+    findings: Record<string, unknown>[]
+    unavailable: { source: string; why: string; cost: string }[]
+    failed_seeds: { seed: string; why: string }[]
+    dropped_by_cap: number
+    notes: string[]
+    coverage_means: string
+    passive_only: string
+  }
+}

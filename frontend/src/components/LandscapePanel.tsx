@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ApiError, landscapePlan, seedKinds } from '../api/client'
-import type { SeedKindCatalogue, SeedKindInfo, SeedPlan, SeedRow } from '../api/types'
+import { ApiError, landscapePlan, landscapeRun, seedKinds } from '../api/client'
+import type { LandscapeRun, SeedKindCatalogue, SeedKindInfo, SeedPlan, SeedRow } from '../api/types'
 
 /**
  * Start a threat landscape from what the operator actually has.
@@ -35,8 +35,10 @@ export function LandscapePanel({ actor }: { actor: string }) {
   const [catalogue, setCatalogue] = useState<SeedKindCatalogue | null>(null)
   const [rows, setRows] = useState<SeedRow[]>([{ id: nextId++, kind: 'domain', value: '' }])
   const [plan, setPlan] = useState<SeedPlan | null>(null)
+  const [run, setRun] = useState<LandscapeRun | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [running, setRunning] = useState(false)
 
   useEffect(() => {
     seedKinds().then(setCatalogue).catch(() => setCatalogue(null))
@@ -50,7 +52,7 @@ export function LandscapePanel({ actor }: { actor: string }) {
     event.preventDefault()
     const filled = rows.filter(r => r.value.trim())
     if (!filled.length) { setError('Add at least one seed.'); return }
-    setBusy(true); setError(''); setPlan(null)
+    setBusy(true); setError(''); setPlan(null); setRun(null)
     try {
       setPlan(await landscapePlan(
         filled.map(r => ({ value: r.value.trim(), kind: r.kind })), actor))
@@ -58,6 +60,19 @@ export function LandscapePanel({ actor }: { actor: string }) {
       setError(err instanceof ApiError ? err.message : 'the plan could not be built')
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function startRun() {
+    const filled = rows.filter(r => r.value.trim())
+    setRunning(true); setError(''); setRun(null)
+    try {
+      setRun(await landscapeRun(
+        filled.map(r => ({ value: r.value.trim(), kind: r.kind })), actor))
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'the run failed')
+    } finally {
+      setRunning(false)
     }
   }
 
@@ -187,6 +202,17 @@ export function LandscapePanel({ actor }: { actor: string }) {
             </div>
           </div>
 
+          <div className="card">
+            <div className="card-title">Run it</div>
+            <p className="lede">
+              Contacts third-party sources for each seed. Nothing is sent to the
+              assets themselves — this reports what they PUBLISH.
+            </p>
+            <button className="btn btn-primary" onClick={startRun} disabled={running}>
+              {running ? 'Running…' : `Run ${plan.summary.seeds} seed(s)`}
+            </button>
+          </div>
+
           {plan.refused.length > 0 && (
             <div className="card">
               <div className="card-title">Not usable as seeds</div>
@@ -197,6 +223,87 @@ export function LandscapePanel({ actor }: { actor: string }) {
                 {plan.refused.map((item, i) => (
                   <li key={i}>
                     <span className="mono">{item.input}</span>
+                    <div className="gap-why">{item.why}</div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
+
+      {run && (
+        <>
+          {/* Every limit on the assembled view, as prominently as the counts. */}
+          {run.landscape.notes.map((note, i) => (
+            <div key={i} className="banner banner-warn" role="note">{note}</div>
+          ))}
+
+          <div className="card">
+            <div className="card-title">Landscape</div>
+            <div className="grid grid-2">
+              <div className="kpi">
+                <div className="num">{run.landscape.asset_count}</div>
+                <div className="kpi-note">assets reached</div>
+              </div>
+              <div className="kpi">
+                <div className="num">{run.landscape.discovered_count}</div>
+                <div className="kpi-note">found that you did not supply</div>
+              </div>
+            </div>
+            {/* NOT A CENSUS, and said where the counts are rather than
+                underneath them. */}
+            <div className="banner banner-info">{run.landscape.coverage_means}</div>
+          </div>
+
+          {run.landscape.assets.length > 0 && (
+            <div className="table-card">
+              <div className="card-title">Assets</div>
+              <div className="table-scroll">
+                <table>
+                  <thead><tr><th>Asset</th><th>Origin</th></tr></thead>
+                  <tbody>
+                    {run.landscape.assets.map((asset, i) => (
+                      <tr key={i}>
+                        <td className="mono">{asset}</td>
+                        <td>
+                          {run.landscape.discovered.includes(asset)
+                            ? 'discovered'
+                            : 'you supplied it'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {run.landscape.unavailable.length > 0 && (
+            <div className="card">
+              <div className="card-title">Sources that could not answer</div>
+              {/* UNAVAILABLE IS NOT CLEAN — the single most consequential thing
+                  this panel can get wrong, so it is a section and not a
+                  footnote. LookupPanel gives the same reason for its banner. */}
+              <ul className="gap-list">
+                {run.landscape.unavailable.map((item, i) => (
+                  <li key={i}>
+                    <strong>{item.source}</strong>
+                    <div className="gap-why">{item.why}</div>
+                    <div className="gap-why">{item.cost}</div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {run.landscape.failed_seeds.length > 0 && (
+            <div className="card">
+              <div className="card-title">Seeds that failed</div>
+              <ul className="gap-list">
+                {run.landscape.failed_seeds.map((item, i) => (
+                  <li key={i}>
+                    <span className="mono">{item.seed}</span>
                     <div className="gap-why">{item.why}</div>
                   </li>
                 ))}

@@ -1315,6 +1315,126 @@ def plan_landscape(body: _SeedsBody) -> Dict[str, Any]:
     }
 
 
+@app.post("/api/v1/landscape/run", tags=["lookup"])
+def run_landscape(body: _SeedsBody) -> Dict[str, Any]:
+    """Run every usable seed and assemble one landscape.
+
+    EACH SEED IS RUN THROUGH THE SAME CODE PATH `/api/v1/lookup` USES. Not a
+    parallel implementation: a second copy of the enrichment would drift, and
+    the first symptom would be the console disagreeing with the lookup screen
+    about the same host.
+
+    A FAILING SEED IS A RESULT, NOT AN EXCEPTION. One unreachable source must
+    not discard the work done for the others, and a landscape that silently
+    omits the seed that failed is indistinguishable from one where that seed
+    found nothing. Failures come back in `failed_seeds`.
+    """
+    from core import seeds as _seeds
+
+    actor = str(body.actor or "").strip()
+    if not actor:
+        raise HTTPException(status_code=400, detail="an actor is required")
+
+    accepted, refused = _seeds.parse_many(
+        [{"value": item.value, "kind": item.kind} for item in body.seeds])
+    running = accepted[:_seeds.MAX_SEEDS_PER_RUN]
+    dropped = len(accepted) - len(running)
+
+    outcomes = []
+    for seed in running:
+        outcomes.append(_run_one_seed(seed, actor))
+
+    return {
+        "seeds": [seed.to_dict() for seed in running],
+        "refused": refused,
+        "summary": _seeds.summarise(running),
+        "outcomes": [o.to_dict() for o in outcomes],
+        "landscape": _seeds.combine(outcomes, dropped_by_cap=dropped),
+    }
+
+
+#: Measured 2026-08-24, three times across the day: crt.sh answers HTTP 502.
+#: `collect/ct.py` already records the same outage and routes name discovery to
+#: CertSpotter instead — but CertSpotter's issuances API takes a DOMAIN, so it
+#: cannot answer "which certificates name this organisation".
+#:
+#: So the organisation seed has NO WORKING KEYLESS SOURCE today. It reports the
+#: source as unavailable rather than returning an empty candidate list, because
+#: an empty list reads as "nobody matched" and the truth is "nothing was asked".
+_ORG_SOURCE_DOWN = {
+    "source": "certificate organisation search (crt.sh)",
+    "why": "crt.sh answered HTTP 502 (measured 2026-08-24, three attempts)",
+    "cost": ("no candidates were produced for this organisation name. That is "
+             "NOT a finding that no organisation matches — the only keyless "
+             "source that can search by organisation was unreachable. "
+             "CertSpotter, which is answering, indexes by domain and cannot "
+             "answer this question at all."),
+    "terms": "open",
+}
+
+
+def _run_one_seed(seed, actor: str):
+    """One seed through the enrichment it is entitled to."""
+    from core import seeds as _seeds
+
+    if seed.kind in (_seeds.SeedKind.DOMAIN, _seeds.SeedKind.ADDRESS):
+        try:
+            found = lookup_target(_LookupBody(target=seed.value, actor=actor))
+        except HTTPException as exc:
+            detail = exc.detail
+            reason = detail.get("error") if isinstance(detail, dict) else str(detail)
+            return _seeds.Outcome(seed=seed, error=str(reason)[:200])
+        except Exception as exc:                                # noqa: BLE001
+            return _seeds.Outcome(seed=seed,
+                                  error=f"{type(exc).__name__}: {exc}"[:200])
+
+        assets = [seed.value]
+        for name in found.get("names") or ():
+            if name and name.lower() not in {a.lower() for a in assets}:
+                assets.append(name)
+        return _seeds.Outcome(
+            seed=seed,
+            assets=tuple(assets),
+            candidates=tuple(found.get("subsidiary_candidates") or ()),
+            findings=tuple(found.get("cti") or ()) + tuple(found.get("abuse") or ()),
+            unavailable=tuple(found.get("unavailable_sources") or ()),
+        )
+
+    if seed.kind is _seeds.SeedKind.ORGANISATION:
+        # See `_ORG_SOURCE_DOWN`. Nothing is contacted, and the reason is
+        # returned rather than an empty result that would read as an answer.
+        return _seeds.Outcome(seed=seed, unavailable=(_ORG_SOURCE_DOWN,))
+
+    # EMAIL. The domain half only — the mailbox was discarded at parse time.
+    return _seeds.Outcome(seed=seed, unavailable=(_hibp_availability(seed.value),))
+
+
+def _hibp_availability(domain: str) -> Dict[str, Any]:
+    """Whether domain breach exposure can be answered for this domain.
+
+    Two conditions, and the operator is told WHICH one is missing. "Unavailable"
+    with no reason sends somebody to buy a key they may already have.
+    """
+    from collect import keyed_sources as _keyed
+
+    has_key = bool(_keyed._key("hibp"))
+    detail = []
+    if not has_key:
+        detail.append("no HIBP API key is configured")
+    detail.append(
+        "domain search additionally requires a live ownership verification "
+        f"for {domain!r} — HIBP answers it only for a domain you have proven "
+        "you control, and SKOPOS reuses its own ownership proof rather than "
+        "inventing a second one")
+    return {
+        "source": "HIBP domain breach exposure",
+        "why": "; ".join(detail),
+        "cost": (f"breach exposure for {domain!r} was not checked. This is NOT "
+                 "a statement that the domain appears in no breach."),
+        "terms": "commercial, keyed",
+    }
+
+
 @app.get("/api/v1/landscape/seed-kinds", tags=["lookup"])
 def seed_kinds() -> Dict[str, Any]:
     """The four inputs the console offers, and what each is honestly good for.
