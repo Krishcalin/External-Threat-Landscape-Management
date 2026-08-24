@@ -1188,6 +1188,45 @@ def _attach_abuse(found, target) -> None:
     found.abuse_coverage = corpus.coverage()
 
 
+def _attach_cti(found, target) -> None:
+    """Ingested third-party intelligence naming this target.
+
+    Everything attached here is somebody else's published claim, carried with
+    their name, their date and a decay weight. `core/cti.py` holds no field for
+    SKOPOS's own opinion of an indicator, and this function adds none.
+
+    Addresses and the name are both checked, because a source may list either.
+    """
+    from core import cti as _cti
+    try:
+        corpus = _cti.CTICorpus.load()
+    except _cti.CTIUnavailable as exc:
+        # NEVER silently absent. An omitted source reads as "nothing found".
+        found.unavailable.append({
+            "source": "ingested CTI",
+            "why": str(exc)[:160],
+            "cost": "third-party threat intelligence was not consulted; this "
+                    "is NOT a statement that the target is absent from it",
+            "terms": "open"})
+        return
+
+    values = [target.value] if not target.is_network else []
+    values.extend(list(target.addresses)[:16])
+    sightings = corpus.correlate(values)
+
+    # One value can be listed by several sources, and the same source can list
+    # both a name and its address. Deduplicated on (source, value) so a target
+    # does not appear in more intelligence than it actually is.
+    seen = set()
+    for sighting in sightings:
+        key = (sighting.indicator.source, sighting.indicator.value)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.cti.append(sighting.to_dict())
+    found.cti_coverage = corpus.coverage()
+
+
 def _attach_leak_listings(found, target) -> None:
     """Ransomware leak-site listings naming this target.
 
@@ -1317,6 +1356,7 @@ def lookup_target(body: _LookupBody) -> Dict[str, Any]:
     # an empty result — "we never built the index" and "nothing matched" are
     # different sentences and only one of them is reassuring.
     _attach_abuse(found, target)
+    _attach_cti(found, target)
     _attach_leak_listings(found, target)
 
     # The licensed sources. Each is inert without its key and reports itself as

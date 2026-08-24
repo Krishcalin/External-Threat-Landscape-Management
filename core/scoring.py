@@ -60,7 +60,12 @@ ASSUMED_CVSS = 5.0
 #: §9.1 severity bands.
 BANDS = ((85, "critical"), (70, "high"), (50, "medium"), (30, "low"), (0, "informational"))
 
-MODEL_VERSION = "teps-1.0.0"
+#: Bumped from 1.0.0 by P9, which added `observed_in_intel` to
+#: AdversaryInterest. A scoring change that did not move the version would make
+#: two incomparable numbers look like the same measurement, and would quietly
+#: corrupt `core/backtest.py` — which scores past forecasts against outcomes and
+#: has to know which model produced each one.
+MODEL_VERSION = "teps-1.1.0"
 
 
 def clamp01(value: float) -> float:
@@ -151,6 +156,16 @@ class AdversaryInterest:
     geo_match: float = 0.0
     tech_match: float = 0.0
     named_mention: float = 0.0
+    #: P9. A named source published this SPECIFIC ASSET in its intelligence,
+    #: weighted by how far `core/cti.py` decay has discounted the claim.
+    #:
+    #: DELIBERATELY A FOURTH LEG RATHER THAN A TRIAD LEG. The three above are
+    #: unsupplied because open data cannot say whether an adversary has a
+    #: REASON to target this estate. This says something different and weaker
+    #: in kind but stronger in evidence: somebody observed this asset and wrote
+    #: it down. Folding it into `tech_match` would let an observation
+    #: masquerade as the inference the triad asks for.
+    observed_in_intel: float = 0.0
     #: False when nothing filled the triad. Distinct from a supplied zero: "no
     #: adversary has a known reason to target this" and "we have no data on
     #: whether one does" are different statements, and 25% of every score turns
@@ -158,8 +173,13 @@ class AdversaryInterest:
     supplied: bool = False
 
     def value(self) -> float:
+        # The triad keeps its original weights so a score without CTI is
+        # unchanged from teps-1.0.0. `observed_in_intel` adds on top and is
+        # clamped with everything else, so a fully-supplied triad cannot be
+        # pushed past 1.0 by a sighting.
         return clamp01(0.35 * self.sector_match + 0.20 * self.geo_match
-                       + 0.30 * self.tech_match + 0.15 * self.named_mention)
+                       + 0.30 * self.tech_match + 0.15 * self.named_mention
+                       + 0.25 * self.observed_in_intel)
 
     @property
     def triad_unsupplied(self) -> bool:
@@ -167,9 +187,17 @@ class AdversaryInterest:
         return not (self.sector_match or self.geo_match or self.tech_match)
 
     @staticmethod
-    def from_catalogue(known_ransomware: bool = False) -> "AdversaryInterest":
-        """What the vendored corpus can honestly support, and nothing more."""
+    def from_catalogue(known_ransomware: bool = False,
+                       intel_weight: float = 0.0) -> "AdversaryInterest":
+        """What the vendored corpora can honestly support, and nothing more.
+
+        `intel_weight` is the decayed weight of the strongest CTI sighting on
+        the asset, straight from `core/cti.py`. It arrives already discounted
+        for age, so a 2016 listing contributes nothing without needing a
+        special case here.
+        """
         return AdversaryInterest(named_mention=1.0 if known_ransomware else 0.0,
+                                 observed_in_intel=clamp01(intel_weight),
                                  supplied=True)
 
 

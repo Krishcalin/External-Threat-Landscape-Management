@@ -51,7 +51,7 @@ from datetime import datetime, timezone
 import time
 from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Any, Dict, Iterable, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.affected import affected_products, parse_version  # noqa: E402
@@ -505,6 +505,154 @@ def _parse_feed(feed, raw: str) -> List[str]:
     return sorted(out)
 
 
+# ── ingested CTI (data/cti.json) ────────────────────────────────────────────
+MISP_FEED = "https://www.circl.lu/doc/misp/feed-osint/"
+THREATFOX_URL = "https://threatfox.abuse.ch/export/json/recent/"
+MALWAREBAZAAR_URL = "https://bazaar.abuse.ch/export/txt/sha256/recent/"
+
+#: Caps on the MISP ingest, and why each exists.
+#:
+#: Measured 2026-08-24: 311 of CIRCL's 1,680 events fall inside the decay
+#: horizon, but roughly half of those are automated daily bulk dumps carrying
+#: ~3,500 attributes each. Ingesting all of them would produce ~600,000
+#: indicators — a corpus dominated by one unsupervised aggregator, most of it
+#: overlapping what `core/blocklists.py` already vendors.
+#:
+#: Both caps are REPORTED in the corpus rather than applied quietly. A
+#: truncated list that does not say it was truncated reads as a complete one.
+#: Allocated SEPARATELY by event kind, because a shared budget does not work.
+#: Measured on the first ingest: taking the 200 most recent events inside the
+#: horizon produced 94,449 indicators, 92,613 of them from daily automated
+#: "Maltrail IOC" dumps and only 1,836 from everything else — the curated
+#: reporting had been crowded out entirely, because an automated feed publishes
+#: daily and an analyst report does not.
+#:
+#: Curated events are rare and small, so all of them are taken. The bulk feed is
+#: capped hard: it is not redundant (only 59 of 92,513 values appear in
+#: data/blocklists.json) but it is unsupervised aggregation, and a 55 MB corpus
+#: dominated by one automated publisher is not a vendored input anybody can
+#: review.
+MISP_MAX_CURATED_EVENTS = 150
+MISP_MAX_BULK_EVENTS = 12
+MISP_MAX_PER_EVENT = 400
+
+
+def fetch_cti() -> Dict:
+    """Vendor the keyless CTI feeds into one corpus for `core/cti.py`.
+
+    ONE FAILING PUBLISHER MUST NOT EMPTY THE CORPUS — the rule `fetch_blocklists`
+    already follows. Each source is fetched independently; on failure its
+    previous indicators are carried forward from the existing corpus and the
+    reason is written into the file. A refresh that "succeeds" with a source
+    silently missing turns every later lookup against it into a clean result.
+    """
+    from collect import abusech, misp
+
+    previous: Dict = {}
+    existing = DATA / "cti.json"
+    if existing.exists():
+        try:
+            with existing.open("r", encoding="utf-8") as handle:
+                previous = json.load(handle)
+        except (OSError, ValueError):
+            previous = {}
+    prior: Dict[str, List[Dict]] = {}
+    for item in previous.get("indicators") or ():
+        prior.setdefault(str(item.get("source") or ""), []).append(item)
+
+    indicators: List[Dict] = []
+    notes: Dict[str, Any] = {}
+    stats: Dict[str, Any] = {}
+
+    def carry_forward(source: str, reason: str) -> None:
+        kept = prior.get(source) or []
+        indicators.extend(kept)
+        notes[source] = (f"FETCH FAILED: {reason}. "
+                         f"{len(kept)} indicators carried forward from the "
+                         f"previous corpus — they are NOT fresh.")
+
+    # -- CIRCL OSINT (MISP feed) --------------------------------------------
+    try:
+        refs = misp.parse_manifest(_get(MISP_FEED + "manifest.json"))
+        horizon = misp.within_horizon(refs)
+        curated, bulk = misp.partition_by_automation(horizon)
+        chosen = (curated[:MISP_MAX_CURATED_EVENTS]
+                  + bulk[:MISP_MAX_BULK_EVENTS])
+        report = misp.ParseReport()
+        failures = 0
+        for ref in chosen:
+            try:
+                raw = _get(f"{MISP_FEED}{ref.uuid}.json")
+            except Exception:                                # noqa: BLE001
+                failures += 1
+                continue
+            try:
+                found, report = misp.indicators_from_event(
+                    raw, ref, cap=MISP_MAX_PER_EVENT, report=report)
+            except misp.FeedMalformed:
+                failures += 1
+                continue
+            indicators.extend(found)
+        stats["circl_osint"] = dict(
+            report.to_dict(),
+            events_in_manifest=len(refs),
+            events_within_horizon=len(horizon),
+            events_fetched=len(chosen) - failures,
+            events_curated_available=len(curated),
+            events_curated_taken=min(len(curated), MISP_MAX_CURATED_EVENTS),
+            events_bulk_available=len(bulk),
+            events_bulk_taken=min(len(bulk), MISP_MAX_BULK_EVENTS),
+            events_dropped_by_cap=max(0, len(horizon) - len(chosen)),
+            events_failed=failures,
+            horizon_days=misp.HORIZON_DAYS,
+            per_event_cap=MISP_MAX_PER_EVENT,
+        )
+    except Exception as exc:                                  # noqa: BLE001
+        carry_forward("circl_osint", str(exc)[:200])
+
+    # -- ThreatFox -----------------------------------------------------------
+    try:
+        found, report = abusech.parse_threatfox(_get(THREATFOX_URL))
+        indicators.extend(found)
+        stats["threatfox"] = report.to_dict()
+    except Exception as exc:                                  # noqa: BLE001
+        carry_forward("threatfox", str(exc)[:200])
+
+    # -- MalwareBazaar -------------------------------------------------------
+    try:
+        found, report = abusech.parse_malwarebazaar(_get(MALWAREBAZAAR_URL))
+        indicators.extend(found)
+        stats["malwarebazaar"] = report.to_dict()
+    except Exception as exc:                                  # noqa: BLE001
+        carry_forward("malwarebazaar", str(exc)[:200])
+
+    by_source: Dict[str, int] = {}
+    for item in indicators:
+        name = str(item.get("source") or "")
+        by_source[name] = by_source.get(name, 0) + 1
+
+    return {
+        "_meta": {
+            "built_on": datetime.now(timezone.utc).date().isoformat(),
+            "indicators": len(indicators),
+            "by_source": dict(sorted(by_source.items())),
+            "parse_stats": stats,
+            "notes": notes,
+            "caps": {
+                "misp_max_curated_events": MISP_MAX_CURATED_EVENTS,
+                "misp_max_bulk_events": MISP_MAX_BULK_EVENTS,
+                "misp_max_per_event": MISP_MAX_PER_EVENT,
+                "why": ("Reported rather than applied quietly. See "
+                        "tools/refresh_intel.py:MISP_MAX_CURATED_EVENTS."),
+            },
+            "note": ("Ingested third-party intelligence. Every entry is the "
+                     "named source's own claim with the source's own date — "
+                     "never a SKOPOS verdict. See core/cti.py."),
+        },
+        "indicators": indicators,
+    }
+
+
 def fetch_leaksites() -> Dict:
     """Vendor the ransomware leak-site victim index.
 
@@ -607,6 +755,11 @@ def main(argv=None) -> int:
                              "--only-artefacts exists")
     parser.add_argument("--skip-blocklists", action="store_true",
                         help="do not refresh data/blocklists.json")
+    parser.add_argument("--only-cti", action="store_true",
+                        help="refresh ONLY data/cti.json — the ingested CTI "
+                             "corpus (CIRCL MISP feed, ThreatFox, "
+                             "MalwareBazaar). Every other corpus is left "
+                             "byte-identical")
     parser.add_argument("--only-leaksites", action="store_true",
                         help="refresh ONLY data/leaksites.json — the public "
                              "ransomware leak-site victim index")
@@ -621,6 +774,17 @@ def main(argv=None) -> int:
     if args.only_blocklists:
         print("Fetching keyless abuse feeds…")
         write(DATA / "blocklists.json", fetch_blocklists())
+        return 0
+
+    if args.only_cti:
+        print("Fetching ingested CTI (CIRCL MISP feed, ThreatFox, "
+              "MalwareBazaar)…")
+        payload = fetch_cti()
+        write(DATA / "cti.json", payload)
+        meta = payload["_meta"]
+        print(f"  {meta['indicators']:,} indicators  {meta['by_source']}")
+        for source, why in (meta.get("notes") or {}).items():
+            print(f"  ! {source}: {why}")
         return 0
 
     if args.only_leaksites:

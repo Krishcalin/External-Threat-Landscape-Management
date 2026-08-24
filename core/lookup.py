@@ -289,6 +289,13 @@ class Lookup:
     #: two travel together for exactly that reason.
     abuse: List[Dict[str, Any]] = field(default_factory=list)
     abuse_coverage: Dict[str, Any] = field(default_factory=dict)
+    #: Ingested third-party CTI naming this target, from `core/cti.py`. Each
+    #: entry is a NAMED SOURCE'S OWN CLAIM carried with that source's date and
+    #: a decay weight — never a SKOPOS verdict. `cti_coverage` carries the
+    #: sentence saying an empty list is not a clean bill of health, and the two
+    #: travel together for exactly that reason.
+    cti: List[Dict[str, Any]] = field(default_factory=list)
+    cti_coverage: Dict[str, Any] = field(default_factory=dict)
     #: Ransomware leak-site listings matching this target, from
     #: `collect/leaksites.py`. A CLAIM BY A GROUP, never a confirmed breach.
     leak_listings: List[Dict[str, Any]] = field(default_factory=list)
@@ -410,6 +417,8 @@ class Lookup:
             # result and means almost nothing on its own.
             "abuse": list(self.abuse),
             "abuse_coverage": dict(self.abuse_coverage),
+            "cti": list(self.cti),
+            "cti_coverage": dict(self.cti_coverage),
             "leak_listings": list(self.leak_listings),
             "leak_coverage": dict(self.leak_coverage),
             "certificates": list(self.certificates),

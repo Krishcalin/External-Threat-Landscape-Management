@@ -176,6 +176,12 @@ OPERATIONS: Dict[str, Exposure] = {
     # is observation. Everything past it — the negotiation portal, the sample
     # archive, the forum behind a login — is on the lines around it.
     "leak_index_read": Exposure.PASSIVE,
+    # Reading a published CTI feed — a MISP feed directory, an abuse.ch bulk
+    # export. PASSIVE for the same reason `leak_index_read` is: it is an
+    # ordinary HTTP GET of something its publisher put on a web root to be
+    # read, and it touches nothing belonging to the estate under scan. The
+    # asset an operation is authorised against is not even involved.
+    "cti_feed_read": Exposure.PASSIVE,
     "forum_authenticate": Exposure.PROHIBITED,
     "forum_transact": Exposure.PROHIBITED,
     # Fetching what a group published ABOUT a victim. Prohibited despite being

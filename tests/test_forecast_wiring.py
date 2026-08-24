@@ -72,8 +72,45 @@ def test_the_vector_carries_the_flags_that_qualified_the_score():
 
 def test_the_model_version_is_pinned_on_every_forecast():
     """Scoring a v1 forecast with a v2 model and publishing that as v2's
-    accuracy is the most obvious way to manufacture an improvement."""
-    assert from_finding(_finding()).model_version == "teps-1.0.0"
+    accuracy is the most obvious way to manufacture an improvement.
+
+    Asserted against the live constant rather than a frozen literal. This test
+    previously pinned "teps-1.0.0" and correctly failed when P9 added
+    `observed_in_intel` to AdversaryInterest — but what it is defending is that
+    every forecast RECORDS the model that produced it, not that the model never
+    changes. Freezing the string turns a real invariant into a change-detector,
+    and the next person to improve the model would edit the literal without
+    ever learning why the pin was there.
+
+    The protection that actually matters lives in `core/backtest.py:score`,
+    which filters to one `model_version` before computing anything — so two
+    models are never pooled into one accuracy figure. `test_the_scoreboard…`
+    below covers that, and this covers the wiring that makes it possible.
+    """
+    from core import scoring
+
+    forecast = from_finding(_finding())
+    assert forecast.model_version == scoring.MODEL_VERSION
+    assert forecast.model_version, "a forecast with no model version is unscorable"
+
+
+def test_a_scoreboard_never_pools_two_model_versions():
+    """The invariant the pin above exists to make possible.
+
+    Without this, adding a factor to TEPS would silently mix scores from the
+    old and new models into one Brier figure — which is exactly the
+    manufactured improvement the docstring above warns about.
+    """
+    import dataclasses
+
+    from core import backtest
+
+    fresh = from_finding(_finding())
+    stale = dataclasses.replace(fresh, model_version="teps-0.9.0")
+
+    board = backtest.score([stale, fresh], fresh.model_version)
+    assert board.model_version == fresh.model_version
+    assert board.issued == 1, "a second model version leaked into the board"
 
 
 # ── the record accumulates ──────────────────────────────────────────────────

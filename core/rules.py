@@ -306,6 +306,41 @@ CATALOGUE: Sequence[Rule] = (
          "threat.",
          "core/blocklists.py", ("asset", "feed")),
 
+    # ── ingested CTI (P9) ───────────────────────────────────────────────────
+    Rule("cti.asset_in_intelligence",
+         "An asset appears in ingested threat intelligence",
+         Category.ABUSE, Severity.ACT,
+         "This exact name or address appears in a named source's published "
+         "intelligence, dated, and recent enough that the age has not "
+         "discounted it below the reporting floor.",
+         "NOT that the asset is compromised, and NOT a judgement by SKOPOS — "
+         "it is the named source's own claim, repeated with their date on it. "
+         "Shared hosting and cloud egress put unrelated tenants behind one "
+         "address. Absence proves nothing: no source observes everything.",
+         "core/cti.py",
+         ("asset", "source", "publisher", "seen_on", "weight", "context")),
+    Rule("cti.asset_named_by_actor_report",
+         "An asset appears in reporting the source ties to a named actor",
+         Category.ABUSE, Severity.ACT,
+         "The source related this indicator to a named threat actor, malware "
+         "family or campaign in a relationship it published.",
+         "THE SOURCE'S ATTRIBUTION, NEVER SKOPOS'S. docs/REFUSALS.md §1 "
+         "refuses to infer attribution — P3 measured a median of 57 groups "
+         "per CVE. This carries a claim somebody else signed; it does not "
+         "compute one, and the actor named is theirs to defend.",
+         "core/cti.py",
+         ("asset", "source", "actor", "seen_on", "weight")),
+    Rule("cti.stale_corpus",
+         "The ingested CTI corpus is old enough that absence means less",
+         Category.COVERAGE, Severity.CONTEXT,
+         "The vendored CTI corpus has not been refreshed recently, so a "
+         "result of no sightings reflects the corpus age as much as the "
+         "estate.",
+         "NOT a finding about any asset. A coverage statement about SKOPOS "
+         "itself, so a reader does not mistake a stale corpus for a quiet "
+         "estate.",
+         "core/cti.py", ("built_on", "age_days")),
+
     # ── ransomware leak sites (P8 W2) ───────────────────────────────────────
     Rule("leak.domain_listed", "A domain in scope appears on a leak site",
          Category.ABUSE, Severity.ACT,
