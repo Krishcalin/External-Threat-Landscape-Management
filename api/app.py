@@ -1277,6 +1277,90 @@ def _attach_leak_listings(found, target) -> None:
     found.leak_coverage = corpus.coverage()
 
 
+class _SeedItem(BaseModel):
+    value: str
+    kind: Optional[str] = None
+
+
+class _SeedsBody(BaseModel):
+    seeds: List[_SeedItem]
+    actor: str
+
+
+@app.post("/api/v1/landscape/plan", tags=["lookup"])
+def plan_landscape(body: _SeedsBody) -> Dict[str, Any]:
+    """Validate a set of seeds and say what each can answer, WITHOUT running.
+
+    A separate call from the run on purpose. The four seed kinds are not
+    equivalent — only a domain expands, an organisation name produces nothing
+    but questions, and an email is answerable only for a verified domain — and
+    an operator who learns that from a thin result afterwards has been misled
+    by the layout. So the screen states it before anything is contacted.
+
+    REFUSALS COME BACK AS DATA, not as a 400. Ten good seeds and one typo is a
+    normal paste, and failing the whole request teaches people to paste less.
+    """
+    from core import seeds as _seeds
+
+    actor = str(body.actor or "").strip()
+    if not actor:
+        raise HTTPException(status_code=400, detail="an actor is required")
+
+    accepted, refused = _seeds.parse_many(
+        [{"value": item.value, "kind": item.kind} for item in body.seeds])
+    return {
+        "seeds": [seed.to_dict() for seed in accepted],
+        "refused": refused,
+        "summary": _seeds.summarise(accepted),
+    }
+
+
+@app.get("/api/v1/landscape/seed-kinds", tags=["lookup"])
+def seed_kinds() -> Dict[str, Any]:
+    """The four inputs the console offers, and what each is honestly good for.
+
+    Served rather than hard-coded in the frontend so the capability text and
+    the code that enforces it cannot drift apart — a screen promising
+    certificate expansion for an address seed would be a lie the backend would
+    not tell.
+    """
+    from core import seeds as _seeds
+
+    examples = {
+        _seeds.SeedKind.DOMAIN: "www.example.com",
+        _seeds.SeedKind.ADDRESS: "198.51.100.5 or 203.0.113.0/24",
+        _seeds.SeedKind.ORGANISATION: "Acme Corporation",
+        _seeds.SeedKind.EMAIL: "someone@example.com",
+    }
+    labels = {
+        _seeds.SeedKind.DOMAIN: "Domain",
+        _seeds.SeedKind.ADDRESS: "IP address or block",
+        _seeds.SeedKind.ORGANISATION: "Organisation name",
+        _seeds.SeedKind.EMAIL: "Email address",
+    }
+    out = []
+    for kind in _seeds.SeedKind:
+        probe = _seeds.Seed(kind, "example.com")
+        out.append({
+            "kind": kind.value,
+            "label": labels[kind],
+            "example": examples[kind],
+            "expands": probe.expands,
+            "capabilities": probe.capabilities(),
+        })
+    return {
+        "kinds": out,
+        "passive_only": _lookup_passive_only(),
+        "why_not_individual": _seeds.WHY_NOT_INDIVIDUAL,
+        "why_org_is_only_a_question": _seeds.WHY_ORG_IS_ONLY_A_QUESTION,
+    }
+
+
+def _lookup_passive_only() -> str:
+    from core import lookup as _lookup
+    return _lookup.PASSIVE_ONLY
+
+
 @app.post("/api/v1/lookup", tags=["lookup"])
 def lookup_target(body: _LookupBody) -> Dict[str, Any]:
     """What the public record says about a domain, a host, an address or a /24.

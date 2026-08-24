@@ -20,6 +20,7 @@ import { RulesPanel } from './components/RulesPanel'
 import { BrandPanel } from './components/BrandPanel'
 import { ExecutivePanel } from './components/ExecutivePanel'
 import { GraphPanel } from './components/GraphPanel'
+import { LandscapePanel } from './components/LandscapePanel'
 import { LookupPanel } from './components/LookupPanel'
 import { OperationsPanel } from './components/OperationsPanel'
 import { SupplierPanel } from './components/SupplierPanel'
@@ -53,7 +54,7 @@ import { TepsBar } from './components/TepsBar'
  */
 
 type Section = 'worklist' | 'operations' | 'executive' | 'crosshair'
-  | 'graph' | 'lookup' | 'brand' | 'suppliers' | 'compliance'
+  | 'graph' | 'landscape' | 'lookup' | 'brand' | 'suppliers' | 'compliance'
   | 'accuracy' | 'alerts' | 'system' | 'account' | 'rules'
 
 /** Worklist first because it is what somebody opens the console to do; System
@@ -68,6 +69,10 @@ const SECTIONS: { id: Section; label: string }[] = [
   { id: 'graph', label: 'Graph' },
   // Adjacent to Suppliers: both ask what the outside world can see about
   // somebody else, and both are passive because they structurally must be.
+  // First of the three, because it is where an estate STARTS: the operator
+  // supplies what they have, and the screen says what each kind can answer
+  // before anything is contacted.
+  { id: 'landscape', label: 'Landscape' },
   { id: 'lookup', label: 'Lookup' },
   { id: 'brand', label: 'Brand' },
   { id: 'suppliers', label: 'Suppliers' },
@@ -369,6 +374,10 @@ export function App({ session = null }: { session?: Session | null }) {
         )}
 
         {section === 'graph' && <GraphPanel />}
+
+        {section === 'landscape' && (
+          <LandscapePanel actor={session?.username ?? 'console'} />
+        )}
 
         {section === 'lookup' && (
           <LookupPanel actor={session?.username ?? 'console'} />

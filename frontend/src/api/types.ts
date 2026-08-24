@@ -716,3 +716,62 @@ export interface RefusalRegister {
   note: string
   document: string
 }
+
+
+/* ── landscape seeds ───────────────────────────────────────────────────────
+ * The four inputs a landscape can start from. They are NOT equivalent: only a
+ * domain expands, and the capability text is served by the API rather than
+ * written in the console so the promise and the code enforcing it cannot
+ * drift apart. */
+export interface SeedCapabilities {
+  runs: string[]
+  expands_to_new_assets?: boolean
+  produces?: string
+  requires?: string[]
+  limits: string
+}
+
+export interface SeedKindInfo {
+  kind: string
+  label: string
+  example: string
+  expands: boolean
+  capabilities: SeedCapabilities
+}
+
+export interface SeedKindCatalogue {
+  kinds: SeedKindInfo[]
+  passive_only: string
+  why_not_individual: string
+  why_org_is_only_a_question: string
+}
+
+export interface Seed {
+  kind: string
+  value: string
+  /** What was typed, minus anything personal. For an email this is the domain
+   *  with the mailbox already discarded — never stored, not merely hidden. */
+  as_entered: string
+  note: string
+  expands: boolean
+  capabilities: SeedCapabilities
+}
+
+export interface SeedPlan {
+  seeds: Seed[]
+  refused: { input: string; why: string }[]
+  summary: {
+    seeds: number
+    by_kind: Record<string, number>
+    expanding_seeds: number
+    notes: string[]
+    passive_only: string
+  }
+}
+
+/** One editable line in the console form. Local state only. */
+export interface SeedRow {
+  id: number
+  kind: string
+  value: string
+}

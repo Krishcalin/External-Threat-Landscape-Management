@@ -3,6 +3,7 @@ import type { RuleCatalogue, RefusalRegister, Accuracy, AlertsView, CertInStatus
               ChangesView, IntelStatus, LatencyReport, RunsPage, Summary,
               BreachReport, ExposureGraph, LookalikeReport,
               LookupResult, SourceCatalogue,
+              SeedKindCatalogue, SeedPlan,
               SupplierRegister, Tenancy } from './types'
 
 /** Relative paths only: the built bundle carries no origin, so it can be served
@@ -108,6 +109,32 @@ export async function lookupTarget(target: string, actor: string) {
 }
 
 export const lookupSources = () => get<SourceCatalogue>('/lookup/sources')
+
+/* ── landscape seeds ───────────────────────────────────────────────────────
+ * The catalogue is fetched rather than hard-coded: a console that promised
+ * certificate expansion for an address seed would be making a claim the
+ * backend does not make. */
+export const seedKinds = () => get<SeedKindCatalogue>('/landscape/seed-kinds')
+
+export async function landscapePlan(
+  seeds: { value: string; kind: string }[], actor: string,
+) {
+  const response = await fetch('/api/v1/landscape/plan', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ seeds, actor }),
+  })
+  if (!response.ok) {
+    let detail: unknown = response.statusText
+    try { detail = (await response.json()).detail } catch { /* keep status */ }
+    const message = typeof detail === 'string'
+      ? detail
+      : (detail as { error?: string })?.error ?? response.statusText
+    throw new ApiError(response.status, message)
+  }
+  return response.json() as Promise<SeedPlan>
+}
 
 /* ── brand and identity exposure ───────────────────────────────────────────
  * Both POST: each performs outbound lookups, and every permit names an actor. */
