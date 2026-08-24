@@ -755,7 +755,7 @@ def fetch_taxii(server: str = "", collections: str = "",
             found, parsed = _stix_ingest.parse_bundle(
                 bundle, source="taxii", publisher=server_info.title or base)
             indicators.extend(found)
-            entities.extend(_stix_ingest.entities(bundle))
+            entities.extend(_stix_ingest.entities(bundle, source="taxii"))
             reports[label] = dict(report.to_dict(), ingest=parsed.to_dict())
         except _stix_ingest.BundleMalformed as exc:
             reports[label] = dict(report.to_dict(),
@@ -766,6 +766,21 @@ def fetch_taxii(server: str = "", collections: str = "",
         if state.key not in seen_keys:
             updated.append(state)
     write(DATA / STATE_FILE, tc.dump_state(updated, built_on=today))
+
+    # PERSIST THE ENTITIES. Before this they were collected and dropped, so
+    # "what is this indicator part of?" was answerable only inside the bundle
+    # that happened to carry both halves.
+    from core import entities as _entities
+    existing_entities: Dict = {}
+    entity_path = DATA / "entities.json"
+    if entity_path.exists():
+        try:
+            with entity_path.open("r", encoding="utf-8") as handle:
+                existing_entities = json.load(handle)
+        except (OSError, ValueError):
+            existing_entities = {}
+    write(entity_path,
+          _entities.merge_corpus(existing_entities, entities, built_on=today))
 
     return {
         "_meta": {
@@ -783,7 +798,11 @@ def fetch_taxii(server: str = "", collections: str = "",
 
 
 def merge_into_cti(polled: Dict) -> Dict:
-    """Fold TAXII-polled indicators into the vendored CTI corpus.
+    """Fold TAXII-polled indicators into the LOCAL overlay corpus.
+
+    Never into `data/cti.json`. That file is vendored and committed, and a
+    poll writing to it would dirty a tracked file on every run and risk
+    committing a partner's intelligence.
 
     Deduplicated on (value, kind, source), keeping the FRESHEST `seen_on`. Two
     polls of a collection that re-serves an object must not make it look like
@@ -791,7 +810,7 @@ def merge_into_cti(polled: Dict) -> Dict:
     stack redundant sources, and this refuses to manufacture them.
     """
     existing: Dict = {}
-    path = DATA / "cti.json"
+    path = DATA / "cti_local.json"
     if path.exists():
         with path.open("r", encoding="utf-8") as handle:
             existing = json.load(handle)
@@ -983,7 +1002,11 @@ def main(argv=None) -> int:
                     print("    ! " + flag)
             if report.get("error"):
                 print("    ! error: " + str(report["error"]))
-        write(DATA / "cti.json", merge_into_cti(polled))
+        # THE OVERLAY, never the vendored corpus. data/cti.json is committed
+        # and must stay identical for everyone who clones; what this
+        # deployment polled from its own server is neither reproducible by
+        # anybody else nor theirs to receive.
+        write(DATA / "cti_local.json", merge_into_cti(polled))
         return 0
 
     if args.only_leaksites:

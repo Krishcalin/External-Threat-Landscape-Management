@@ -279,6 +279,31 @@ NAMED_ENTITY_TYPES = ("malware", "threat-actor", "intrusion-set", "campaign",
                       "tool", "attack-pattern")
 
 
+def _entity_links(bundle_objects: Sequence[Dict[str, Any]]
+                  ) -> Dict[str, List[str]]:
+    """indicator id -> the ids of the named entities it was related to.
+
+    The STRUCTURAL half of `_entity_context`. The context string is what a
+    human reads; these ids are what `core/entities.py` resolves against, and
+    they are the reason "what is this indicator part of?" survives the bundle
+    it arrived in. A prose field cannot be looked up.
+    """
+    named = {str(o.get("id")) for o in bundle_objects
+             if o.get("type") in NAMED_ENTITY_TYPES and o.get("id")}
+    out: Dict[str, List[str]] = {}
+    for obj in bundle_objects:
+        if obj.get("type") != "relationship":
+            continue
+        source = str(obj.get("source_ref") or "")
+        target = str(obj.get("target_ref") or "")
+        for a, b in ((source, target), (target, source)):
+            if a.startswith("indicator--") and b in named:
+                refs = out.setdefault(a, [])
+                if b not in refs:
+                    refs.append(b)
+    return out
+
+
 def _entity_context(bundle_objects: Sequence[Dict[str, Any]]
                     ) -> Dict[str, str]:
     """indicator id → the named entity it was related to, via relationships.
@@ -334,11 +359,13 @@ def parse_bundle(raw: bytes | str | Dict[str, Any],
     markings = _markings(objects)
     identities = _identities(objects)
     entity_for = _entity_context(objects)
+    links_for = _entity_links(objects)
     report = ParseReport()
     out: List[Dict[str, Any]] = []
 
     def emit(value: str, kind: str, obj: Dict[str, Any],
-             context: str, from_pattern: bool) -> None:
+             context: str, from_pattern: bool,
+             entity_refs: Optional[Sequence[str]] = None) -> None:
         if not value:
             report.empty_value += 1
             return
@@ -366,6 +393,11 @@ def parse_bundle(raw: bytes | str | Dict[str, Any],
         valid_until = str(obj.get("valid_until") or "")[:10]
         if valid_until:
             entry["valid_until"] = valid_until
+        if entity_refs:
+            # Resolved by `core/entities.py` LATER and across bundles. Stored
+            # as ids rather than names because a name is what changes when a
+            # source renames a group; the id is what it published.
+            entry["entity_refs"] = list(entity_refs)
         out.append(entry)
         report.kept += 1
         if from_pattern:
@@ -399,8 +431,10 @@ def parse_bundle(raw: bytes | str | Dict[str, Any],
                        or str(obj.get("name") or "")
                        or str(obj.get("description") or "")[:200]
                        or "STIX indicator")
+            refs = links_for.get(str(obj.get("id")))
             for kind, value in values:
-                emit(value, kind, obj, context, from_pattern=True)
+                emit(value, kind, obj, context, from_pattern=True,
+                     entity_refs=refs)
             continue
 
         if stix_type in SCO_KINDS:
@@ -437,7 +471,8 @@ def parse_bundle(raw: bytes | str | Dict[str, Any],
     return out, report
 
 
-def entities(raw: bytes | str | Dict[str, Any]) -> List[Dict[str, Any]]:
+def entities(raw: bytes | str | Dict[str, Any],
+             source: str = "stix") -> List[Dict[str, Any]]:
     """The named entities a bundle asserts — actors, malware, campaigns.
 
     Separate from `parse_bundle` because these are not indicators and must not
@@ -468,6 +503,10 @@ def entities(raw: bytes | str | Dict[str, Any]) -> List[Dict[str, Any]]:
             "id": str(obj.get("id") or ""),
             "kind": str(obj.get("type") or ""),
             "name": str(obj.get("name") or ""),
+            # PART OF WHAT IDENTIFIES THE RECORD. `core/entities.py` keys on
+            # (source, id) because two sources publishing one id keep two
+            # records — merging them would be an attribution judgement.
+            "source": source,
             "aliases": [str(a) for a in (obj.get("aliases") or [])],
             "description": str(obj.get("description") or "")[:400],
             "asserted_by": identities.get(

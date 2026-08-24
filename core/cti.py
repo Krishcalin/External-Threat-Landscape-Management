@@ -77,7 +77,22 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
+
+#: THE VENDORED CORPUS — built from fixed public feeds by
+#: `tools/refresh_intel.py --only-cti`, committed, and identical for everyone
+#: who clones the repository. That reproducibility is the whole argument for
+#: vendoring (see `core/blocklists.py`), and it only holds while the file
+#: contains nothing deployment-specific.
 DEFAULT_PATH = ROOT / "data" / "cti.json"
+
+#: THE LOCAL OVERLAY — whatever this deployment polled from its own TAXII
+#: server. Gitignored, because it is neither reproducible by anybody else nor
+#: theirs to receive: a partner's collection is shared with THIS operator.
+#:
+#: Kept as a separate file rather than merged into the vendored one so that a
+#: poll never dirties a tracked file, and a commit can never push somebody's
+#: private intelligence.
+LOCAL_PATH = ROOT / "data" / "cti_local.json"
 
 
 class CTIUnavailable(RuntimeError):
@@ -287,6 +302,11 @@ class Indicator:
     #: The publishing organisation the source itself names, where it names one.
     #: MISP events carry `Orgc`; the abuse.ch bulk feeds do not.
     reporter: str = ""
+    #: STIX ids of the entities the SOURCE related this indicator to, resolved
+    #: by `core/entities.py`. Ids rather than names because a name is what
+    #: changes when a source renames a group; the id is what it published.
+    #: Empty for the bulk feeds, which assert no entities at all.
+    entity_refs: Tuple[str, ...] = ()
 
     def age_days(self, today: Optional[date] = None) -> int:
         return _age_days(self.seen_on, today)
@@ -313,6 +333,7 @@ class Indicator:
             "tags": list(self.tags),
             "tlp": self.tlp,
             "exportable": exportable(self.tlp),
+            "entity_refs": list(self.entity_refs),
         }
 
 
@@ -398,6 +419,7 @@ class CTICorpus:
                 tags=tuple(raw.get("tags") or ()),
                 tlp=str(raw.get("tlp") or "WHITE"),
                 reporter=str(raw.get("reporter") or ""),
+                entity_refs=tuple(raw.get("entity_refs") or ()),
             )
             if not item.value:
                 continue
@@ -405,14 +427,41 @@ class CTICorpus:
             self._count += 1
 
     @classmethod
-    def load(cls, path: Optional[Path] = None) -> "CTICorpus":
+    def load(cls, path: Optional[Path] = None,
+             local: Optional[Path] = None) -> "CTICorpus":
+        """The vendored corpus, with any locally-polled overlay on top.
+
+        The overlay is OPTIONAL and its absence is not an error: most
+        deployments never configure a TAXII server, and treating that as a
+        failure would make the common case look broken.
+        """
         target = Path(path) if path else DEFAULT_PATH
         if not target.exists():
             raise CTIUnavailable(
                 f"No ingested intelligence at {target}. Build it with "
                 f"`python tools/refresh_intel.py --only-cti`.")
         with target.open("r", encoding="utf-8") as handle:
-            return cls(json.load(handle))
+            payload = json.load(handle)
+
+        overlay = Path(local) if local else LOCAL_PATH
+        if overlay.exists():
+            try:
+                with overlay.open("r", encoding="utf-8") as handle:
+                    extra = json.load(handle)
+            except (OSError, ValueError):
+                # A corrupt overlay must not take the vendored corpus with it.
+                extra = {}
+            payload = dict(payload)
+            payload["indicators"] = (list(payload.get("indicators") or [])
+                                     + list(extra.get("indicators") or []))
+            meta = dict(payload.get("_meta") or {})
+            meta["local_overlay"] = {
+                "path": overlay.name,
+                "built_on": (extra.get("_meta") or {}).get("built_on", ""),
+                "indicators": len(extra.get("indicators") or []),
+            }
+            payload["_meta"] = meta
+        return cls(payload)
 
     # -- lookups -------------------------------------------------------------
     def lookup(self, value: str,

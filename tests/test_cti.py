@@ -354,3 +354,67 @@ def test_the_parsers_perform_no_network_io(module):
     for banned in ("urllib", "http", "socket", "requests", "httpx",
                    "subprocess", "ssl"):
         assert banned not in imported, f"{module.__name__} imports {banned}"
+
+
+# ── vendored corpus vs local overlay ────────────────────────────────────────
+# `--only-cti` builds data/cti.json from fixed public feeds: committed, and
+# identical for everyone who clones. `--only-taxii` polls THIS deployment's own
+# server, which is neither reproducible by anybody else nor theirs to receive —
+# a partner's collection is shared with one operator. Keeping them in separate
+# files means a poll never dirties a tracked file and a commit can never push
+# somebody's private intelligence.
+
+def _write(path, indicators, built_on="2026-08-24"):
+    path.write_text(json.dumps({"_meta": {"built_on": built_on},
+                                "indicators": indicators}), encoding="utf-8")
+
+
+def test_the_overlay_layers_on_top_of_the_vendored_corpus(tmp_path):
+    vendored, local = tmp_path / "cti.json", tmp_path / "cti_local.json"
+    _write(vendored, [dataclasses.asdict(indicator(value="a.example"))])
+    _write(local, [dataclasses.asdict(indicator(value="b.example",
+                                                source="taxii"))])
+    store = cti.CTICorpus.load(vendored, local)
+    assert store.count == 2
+    assert store.correlate(["b.example"], TODAY)
+
+
+def test_a_missing_overlay_is_not_an_error(tmp_path):
+    """Most deployments never configure a TAXII server, and treating that as a
+    failure would make the common case look broken."""
+    vendored = tmp_path / "cti.json"
+    _write(vendored, [dataclasses.asdict(indicator())])
+    assert cti.CTICorpus.load(vendored, tmp_path / "absent.json").count == 1
+
+
+def test_a_corrupt_overlay_does_not_take_the_vendored_corpus_with_it(tmp_path):
+    """The vendored corpus is the reproducible one. Losing it because a local
+    poll wrote a truncated file would be the worse failure by far."""
+    vendored, local = tmp_path / "cti.json", tmp_path / "cti_local.json"
+    _write(vendored, [dataclasses.asdict(indicator())])
+    local.write_text("{not json", encoding="utf-8")
+    assert cti.CTICorpus.load(vendored, local).count == 1
+
+
+def test_the_overlay_is_recorded_in_provenance(tmp_path):
+    """A reader must be able to tell which indicators everyone has and which
+    came from this deployment's own server."""
+    vendored, local = tmp_path / "cti.json", tmp_path / "cti_local.json"
+    _write(vendored, [])
+    _write(local, [dataclasses.asdict(indicator(source="taxii"))],
+           built_on="2026-08-20")
+    store = cti.CTICorpus.load(vendored, local)
+    assert store._meta["local_overlay"]["indicators"] == 1
+    assert store._meta["local_overlay"]["built_on"] == "2026-08-20"
+
+
+def test_entity_refs_survive_the_corpus(tmp_path):
+    """The link is what makes "what is this part of?" answerable after the
+    bundle is gone. Dropping it at the store boundary would silently sever it."""
+    vendored = tmp_path / "cti.json"
+    row = dataclasses.asdict(indicator(value="c2.example"))
+    row["entity_refs"] = ["threat-actor--t1"]
+    _write(vendored, [row])
+    store = cti.CTICorpus.load(vendored, tmp_path / "absent.json")
+    hit = store.correlate(["c2.example"], TODAY)[0]
+    assert hit.indicator.entity_refs == ("threat-actor--t1",)

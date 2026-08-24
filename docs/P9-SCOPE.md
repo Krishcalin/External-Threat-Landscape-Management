@@ -373,10 +373,91 @@ Running it against the existing corpus deduplicated 11,820 records to 10,965
 
 ---
 
+## Entity persistence — carried, never merged
+
+`stix_ingest.entities()` extracted actors, malware and campaigns; nothing
+stored them, so *"what is this indicator part of?"* was answerable only inside
+the bundle that happened to carry both halves. `core/entities.py` closes that.
+
+### The one decision this module refuses to make
+
+Every CTI platform merges entities. OpenCTI deduplicates threat actors on alias
+overlap, so a feed calling a group `UAC-0001` and another calling it `APT28`
+become one node with both names.
+
+**SKOPOS does not.** Deciding that two sources describe the same group is an
+attribution judgement — precisely the inference §1 refuses. Alias overlap is
+*evidence*; it is not proof, and the merge is irreversible in a way the
+evidence is not.
+
+The failure being avoided is specific: **a wrong merge is invisible
+afterwards.** The two names become one node, the disagreement between sources
+disappears, and every later reader sees a consensus that never existed.
+
+So two feeds sharing a name are recorded as **two entities and one question**,
+the same shape `core/candidates.py` uses for a discovered name — a question for
+the triage queue, never an addition to scope. Records are keyed on
+`(source, id)`, so two sources publishing one id keep two records.
+
+### The structural link
+
+A context string like `"Fancy Example (threat-actor)"` reads well and cannot be
+looked up. `parse_bundle` now also emits `entity_refs` — the STIX ids — because
+a name is what changes when a source renames a group, and the id is what it
+published. Those ids survive into `core/cti.py:Indicator`, which is what makes
+the answer outlive the poll that produced it.
+
+Where an indicator names no entity the key is **absent rather than empty**: an
+empty list reads as "we looked and it belongs to nothing", which is not what
+happened.
+
+### Measured against a live poll
+
+MITRE's ICS ATT&CK collection yielded **91 entities** — 60 attack-patterns, 18
+malware, 10 intrusion-sets, 3 campaigns — resolvable by name and alias across
+polls.
+
+That poll also hit a real `502 Bad Gateway` after 7 of its pages, which
+exercised the error path in production rather than in a test: **the cursor did
+not advance**, so the next run re-covers the ~1,400 objects it never received
+instead of skipping them.
+
+---
+
+## The vendored corpus and the local overlay
+
+Wiring the poller created a problem worth recording, because it was invisible
+until the file was inspected: `--only-taxii` was writing into `data/cti.json`,
+which is **vendored and committed**.
+
+That is wrong in two directions. Every poll dirtied a tracked file, and a
+commit would have pushed intelligence a partner shared with *one operator* to
+everyone who clones the repository.
+
+| File | Built by | Tracked? |
+|---|---|---|
+| `data/cti.json` | `--only-cti`, fixed public feeds | **committed** — identical for everyone |
+| `data/cti_local.json` | `--only-taxii`, this deployment's server | gitignored |
+| `data/entities.json` | `--only-taxii` | gitignored |
+| `data/taxii_state.json` | `--only-taxii` | gitignored |
+
+`CTICorpus.load()` reads the vendored corpus and layers the overlay on top. A
+missing overlay is **not an error** — most deployments never configure a TAXII
+server, and treating that as a failure would make the common case look broken.
+A *corrupt* overlay is discarded rather than allowed to take the vendored
+corpus with it, because the reproducible one is the one worth protecting.
+
+---
+
 ## What is still open
 
-- **Entity persistence.** `collect/stix_ingest.py:entities()` extracts actors,
-  malware and campaigns, and `fetch_taxii` collects them, but nothing stores or
-  queries them yet. "What is this indicator part of?" is answerable only within
-  a single bundle.
+- **Organisation provisioning.** Row-level security is built and proven, but an
+  organisation can still only be created by hand in the database
+  (`core/refusals.py:185`). This is what blocks anyone else deploying SKOPOS.
+- **Three keyed sources have never touched a live API.**
+  `collect/keyed_sources.py:VERIFIED_LIVE` records `{shodan: False,
+  virustotal: False, hibp: False}` — the same position the OpenCTI connector
+  was in before an instance was stood up.
+- **SKOPOS has never run against a real estate.** Everything so far is measured
+  against public feeds and synthetic findings.
 - **AEV**, deferred by explicit decision.

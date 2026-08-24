@@ -44,3 +44,10 @@ frontend/.render-check/
 # Committing it would hand every clone a cursor from a machine that is not
 # theirs, and the first poll would silently skip everything before it.
 data/taxii_state.json
+
+# Polled from THIS deployment's own TAXII server. Neither reproducible by
+# anybody else nor theirs to receive — a partner's collection is shared with
+# one operator, not with everyone who clones the repository. The vendored
+# data/cti.json stays committed and identical for everyone.
+data/cti_local.json
+data/entities.json

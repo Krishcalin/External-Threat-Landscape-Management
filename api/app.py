@@ -1214,6 +1214,24 @@ def _attach_cti(found, target) -> None:
     values.extend(list(target.addresses)[:16])
     sightings = corpus.correlate(values)
 
+    # WHAT THE INDICATOR IS PART OF, according to whoever published it.
+    # Resolved across polls rather than within one bundle — that is the whole
+    # reason the ids are persisted. A missing corpus is reported rather than
+    # answered as "part of nothing", which is a different claim.
+    from core import entities as _entities
+    try:
+        known = _entities.EntityStore.load()
+    except _entities.EntitiesUnavailable as exc:
+        known = None
+        if any(s.indicator.entity_refs for s in sightings):
+            found.unavailable.append({
+                "source": "threat entities",
+                "why": str(exc)[:160],
+                "cost": "an indicator names the actor or malware it belongs "
+                        "to, but the entity corpus was not available to "
+                        "resolve it",
+                "terms": "open"})
+
     # One value can be listed by several sources, and the same source can list
     # both a name and its address. Deduplicated on (source, value) so a target
     # does not appear in more intelligence than it actually is.
@@ -1223,8 +1241,18 @@ def _attach_cti(found, target) -> None:
         if key in seen:
             continue
         seen.add(key)
-        found.cti.append(sighting.to_dict())
+        payload = sighting.to_dict()
+        if known is not None and sighting.indicator.entity_refs:
+            payload["part_of"] = [
+                e.to_dict()
+                for e in known.for_indicator(sighting.indicator.entity_refs)]
+        found.cti.append(payload)
     found.cti_coverage = corpus.coverage()
+    if known is not None:
+        # The open attribution questions travel with the coverage, because a
+        # reader seeing two sources' names needs to know SKOPOS did not decide
+        # which is right.
+        found.cti_coverage["entities"] = known.coverage()
 
 
 def _attach_leak_listings(found, target) -> None:
