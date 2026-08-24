@@ -418,8 +418,16 @@ def infrastructure(asset: str, product: str = "",
 
 
 def relationship(finding: Dict[str, Any],
-                 created: Optional[str] = None) -> Dict[str, Any]:
-    """The object that must not overstate the finding. See the module docstring."""
+                 created: Optional[str] = None,
+                 org: str = "") -> Dict[str, Any]:
+    """The object that must not overstate the finding. See the module docstring.
+
+    `org` MUST match the value the bundle used to build its infrastructure
+    objects. It is not decoration: `infrastructure()` namespaces its id by
+    organisation, so a relationship built with a different `org` points at an
+    asset that does not exist. That is not a hypothetical — it shipped. See
+    the note on `source_ref` below.
+    """
     asset = str(finding.get("asset") or "")
     cve = str(finding.get("cve") or "")
     determined = str(finding.get("basis") or "") == "version_range"
@@ -457,7 +465,15 @@ def relationship(finding: Dict[str, Any],
         "created": created or _now(),
         "modified": created or _now(),
         "relationship_type": rel_type,
-        "source_ref": _id("infrastructure", asset),
+        # DERIVED, never recomputed. This line used to read
+        #     _id("infrastructure", asset)
+        # while `infrastructure()` built `_id("infrastructure", org, asset)`.
+        # The two formulas could never agree, so every asset-to-CVE edge
+        # referenced an infrastructure absent from its own bundle. A live
+        # OpenCTI rejected them with MISSING_REFERENCE_ERROR; the stub had only
+        # ever checked STIX shape, which the broken edge satisfied perfectly.
+        # Calling the constructor means there is one definition to disagree with.
+        "source_ref": infrastructure(asset, org=org)["id"],
         "target_ref": _id("vulnerability", cve),
         "confidence": confidence,
         "description": summary,
@@ -737,6 +753,24 @@ def bundle(findings: Iterable[Dict[str, Any]],
                     seen.add(("sco", observable["id"]))
                 objects.append(composed_of(infra["id"], observable["id"], stamp))
 
+            # RESOLUTION, on the same reasoning `exposure_bundle()` gives for
+            # emitting it there: the join is one a consumer cannot make for
+            # itself, and this path already holds both halves. It was missing
+            # here purely because the two export paths were written apart —
+            # composing an address onto an asset says they belong together, not
+            # that the name resolves to it.
+            #
+            # Only where the asset is a NAME. An asset that IS an address does
+            # not resolve to anything, and `resolves-to` between two addresses
+            # would assert a hop nobody observed.
+            if ip_address(asset) is None:
+                origin = domain_name(asset)
+                for value in finding.get("addresses") or []:
+                    resolved = ip_address(value)
+                    if origin and resolved:
+                        objects.append(
+                            resolves_to(origin["id"], resolved["id"], stamp))
+
             # THE OWNERSHIP EDGE, emitted only where ownership was actually
             # verified. An unconditional edge would assert control this product
             # never established, which is the one claim it exists to be careful
@@ -758,7 +792,7 @@ def bundle(findings: Iterable[Dict[str, Any]],
                                          str(finding.get("required_action") or ""),
                                          stamp, ssvc=points))
             seen.add(("vuln", cve))
-        objects.append(relationship(finding, stamp))
+        objects.append(relationship(finding, stamp, org=org))
 
     if objects:
         relationship_ids = [o["id"] for o in objects

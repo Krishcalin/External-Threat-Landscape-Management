@@ -197,3 +197,77 @@ def test_the_post_helper_refuses_plaintext_and_unlisted_hosts():
     with pytest.raises(egress.PermitMismatch):
         egress.http_post_json(permit, "advisory_lookup",
                               "https://attacker.example/collect", {})
+
+
+# ── referential integrity ───────────────────────────────────────────────────
+# Added after a live OpenCTI 7.260817.0 rejected two relationships per bundle
+# with MISSING_REFERENCE_ERROR. `relationship()` recomputed the infrastructure
+# id with its own formula while `infrastructure()` had gained an org component,
+# so EVERY asset-to-CVE edge referenced an object absent from its own bundle.
+#
+# Nothing caught it because every existing test checked STIX *shape*, and a
+# dangling reference is perfectly well-shaped. This checks the graph instead.
+
+def _refs(bundle):
+    for obj in bundle["objects"]:
+        if obj["type"] == "relationship":
+            yield obj, "source_ref", obj["source_ref"]
+            yield obj, "target_ref", obj["target_ref"]
+        for ref in obj.get("object_refs") or []:
+            yield obj, "object_refs", ref
+
+
+@pytest.mark.parametrize("org", ["", "acme", "verify-org"])
+def test_every_reference_resolves_inside_the_bundle(org):
+    """The bug this exists for was invisible at every org value, including the
+    default — the two formulas differed in arity, not just content."""
+    payload = stix.bundle([finding(basis="version_range"),
+                           finding(asset="b.example", cve="CVE-2018-13379",
+                                   basis="product_match")], org=org)
+    present = {o["id"] for o in payload["objects"]}
+    dangling = [(o["type"], field, ref)
+                for o, field, ref in _refs(payload) if ref not in present]
+    assert dangling == [], f"references to objects not in the bundle: {dangling}"
+
+
+def test_the_asset_to_cve_edge_points_at_the_emitted_infrastructure():
+    """The specific edge that was broken, named so a regression is legible
+    rather than showing up as a generic integrity failure."""
+    payload = stix.bundle([finding(basis="version_range")], org="acme")
+    infra = [o for o in payload["objects"] if o["type"] == "infrastructure"]
+    edge = next(o for o in payload["objects"]
+                if o["type"] == "relationship"
+                and o["relationship_type"] in ("has", "related-to"))
+    assert edge["source_ref"] in {o["id"] for o in infra}
+
+
+def test_a_relationship_built_for_another_org_does_not_match():
+    """The converse. If org stopped affecting the id, the namespacing that
+    keeps two tenants' `vpn.internal` apart would be silently gone."""
+    a = stix.relationship(finding(), org="acme")["source_ref"]
+    b = stix.relationship(finding(), org="other")["source_ref"]
+    assert a != b
+
+
+def test_every_stix_export_route_passes_an_org():
+    """Parsed, not grepped — and about the omission CLASS, not two instances.
+
+    `org` has a default, so leaving it off is silent. It costs two things:
+    every infrastructure id collapses into the `default` namespace, which is
+    the cross-tenant collision `infrastructure()` exists to prevent; and
+    `belongs_to` is gated on a truthy org, so the ownership edge is never
+    emitted. Two of the three export routes had shipped that way.
+    """
+    import ast
+    import pathlib
+
+    source = pathlib.Path("api/app.py").read_text(encoding="utf-8")
+    missing = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        name = ast.unparse(node.func)
+        if name.endswith(("stix.bundle", "stix.exposure_bundle")):
+            if not any(k.arg == "org" for k in node.keywords):
+                missing.append(f"{name} at line {node.lineno}")
+    assert missing == [], f"STIX export without an org namespace: {missing}"

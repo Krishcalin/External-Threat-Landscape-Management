@@ -238,15 +238,43 @@ def test_a_failure_is_reported_rather_than_swallowed(monkeypatch):
 
 # ── transport details that cost an afternoon otherwise ──────────────────────
 def test_the_taxii_media_type_is_used_not_plain_json():
-    """OpenCTI answers `application/json` with a 415."""
+    """MEASURED against OpenCTI 7.260817.0, not read from the docs.
+
+    Its validator accepts a type in
+    `["application/taxii+json", "application/vnd.oasis.stix+json"]` AND a
+    `version` parameter of exactly 2.1. Anything else is a 400 with
+    `{"error_code": "UNSUPPORTED_ERROR"}` — not the 415 this docstring used to
+    claim.
+
+    The trap: `application/stix+json` is what the collection ADVERTISES in its
+    own discovery document under `media_types`, and it is rejected.
+    """
     assert opencti.MEDIA_TYPE == "application/taxii+json;version=2.1"
+    assert ";version=2.1" in opencti.MEDIA_TYPE
 
 
 def test_the_endpoint_is_built_rather_than_configured_whole():
     """So an operator cannot point this at a non-TAXII URL and get a 200 from
-    something else entirely."""
+    something else entirely.
+
+    The path is VERIFIED against a running platform's own route table. It was
+    previously `/taxii2/{id}/objects/`, which 404s: OpenCTI mounts collections
+    under a hard-coded api-root named `root`.
+    """
     assert opencti._endpoint("https://cti.example.com/", "abc") == (
-        "https://cti.example.com/taxii2/abc/objects/")
+        "https://cti.example.com/taxii2/root/collections/abc/objects/")
+
+
+def test_a_404_from_this_endpoint_probably_means_the_ingester_is_stopped():
+    """Not a shape test — a note pinned where somebody debugging will find it.
+
+    OpenCTI's POST handler answers `Collection not found` (404) when the TAXII
+    Push ingester exists but has `ingestion_running != true`, while the
+    discovery endpoint cheerfully lists that same collection with
+    `can_write: true`. The message sends you looking for the wrong thing.
+    """
+    assert "Data > Ingestion" in opencti.__doc__
+    assert "404" in opencti.__doc__
 
 
 def test_a_large_bundle_is_split():

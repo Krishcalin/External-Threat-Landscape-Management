@@ -361,6 +361,7 @@ def _taxii_objects(store) -> tuple:
     """
     from core import stix as _stix
     from core import taxii as _taxii
+    from core import tenancy as _tenancy
 
     runs = store.runs(limit=1)
     if not runs:
@@ -374,7 +375,12 @@ def _taxii_objects(store) -> tuple:
         stamp = stamp + "Z"
 
     rows = store.findings(limit=_taxii.MAX_PAGE)
-    bundle = _stix.bundle(rows, created=stamp)
+    # `org` is not optional here even though it has a default. Without it every
+    # infrastructure id falls back to the `default` namespace — the collision
+    # `infrastructure()` documents, where two tenants' `vpn.internal` become one
+    # asset inside a consumer ingesting from both — and `belongs_to` is gated on
+    # a truthy org, so the ownership edge is never emitted at all.
+    bundle = _stix.bundle(rows, created=stamp, org=_tenancy.current_org())
     objects = bundle.get("objects", [])
     determinations = sum(1 for r in rows if str(r.get("basis")) == "version_range")
     return objects, stamp, {"determinations": determinations,
@@ -888,8 +894,11 @@ def export_stix(limit: int = Query(500, ge=1, le=2000),
     bundle. A caveat that stays behind in the console is not a caveat.
     """
     from core import stix as _stix
+    from core import tenancy as _tenancy
     rows = _findings_store().findings(run_id=run, limit=limit)
-    bundle = _stix.bundle(rows)
+    # See the note on the TAXII feed builder: omitting `org` collapses every
+    # tenant into one id namespace and silently drops the ownership edge.
+    bundle = _stix.bundle(rows, org=_tenancy.current_org())
     return {
         "bundle": bundle,
         "objects": len(bundle.get("objects", [])),

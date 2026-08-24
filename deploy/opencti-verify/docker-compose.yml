@@ -1,0 +1,160 @@
+# A minimal OpenCTI, for VERIFYING the SKOPOS connector. Not for production.
+#
+# WHY THIS EXISTS RATHER THAN FILIGRAN'S OWN COMPOSE
+# ----------------------------------------------------
+# Their reference compose is sized for a real deployment and, since 2026, also
+# pulls in XTM One with its own PostgreSQL 17 + pgvector. On a 16 GB laptop with
+# a 7.6 GiB WSL ceiling that does not start, and none of it is needed to answer
+# the only question here: does OpenCTI accept and correctly ingest the bundle
+# SKOPOS produces?
+#
+# Every heap below is deliberately far under Filigran's documented minimum
+# (Elasticsearch 8 GB, platform 8 GB). Those are production figures. This is a
+# throwaway that holds a few hundred objects.
+#
+#   DO NOT USE THIS FOR ANYTHING REAL. It has no persistence guarantees, one
+#   worker, a trivial admin password, and heaps that will fall over the moment
+#   a live connector starts ingesting.
+#
+# USAGE
+#   docker compose -f deploy/opencti-verify/docker-compose.yml up -d
+#   # wait ~2 minutes, then http://127.0.0.1:8081
+#   # login: admin@skopos.local / verify-only-not-a-real-password
+#
+# TEARDOWN — do this when finished, it is 4 GB of RAM
+#   docker compose -f deploy/opencti-verify/docker-compose.yml down -v
+
+name: opencti-verify
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: redis-server --save "" --appendonly no --maxmemory 256mb
+    # No persistence at all. This instance is disposable by design and Redis
+    # carries the event stream, not the knowledge — losing it costs nothing here.
+
+  elasticsearch:
+    # PINNED TO 8.x DELIBERATELY. OpenCTI does not support Elasticsearch 9
+    # (issue #10729, flagged breaking), and `:8` would eventually resolve to it.
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.16
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      # 1 GB against a documented 8. Enough for a few hundred objects and
+      # nothing else; this is the single biggest reason the stack fits.
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - thread_pool.search.queue_size=5000
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+
+  minio:
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    restart: unless-stopped
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: opencti
+      MINIO_ROOT_PASSWORD: verify-only-minio
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: opencti
+      RABBITMQ_DEFAULT_PASS: verify-only-rabbit
+      # The platform refuses large bundles without this, and SKOPOS chunks at
+      # 2,000 objects which can exceed the default.
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit consumer_timeout 86400000"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
+  opencti:
+    # Current stable, CalVer. NOT an `-lts` tag: an LTS build refuses to start
+    # without a paid licence — it validates only `lts` or `ci` licence types at
+    # application root — so `7.260309.0-lts.7` would come up as a login wall.
+    # `rolling` and `latest` are moving targets; pin the date.
+    image: opencti/platform:7.260817.0
+    restart: unless-stopped
+    # 8081 because 8100 is SKOPOS and 8080 is already taken on this host.
+    ports: ["127.0.0.1:8081:8080"]
+    environment:
+      - NODE_OPTIONS=--max-old-space-size=1536
+      - APP__PORT=8080
+      - APP__BASE_URL=http://127.0.0.1:8081
+      - APP__ADMIN__EMAIL=admin@skopos.local
+      - APP__ADMIN__PASSWORD=verify-only-not-a-real-password
+      # Fixed, so the token below is stable across recreates and you can put it
+      # straight into SKOPOS_OPENCTI_TOKEN without reading it out of the UI.
+      - APP__ADMIN__TOKEN=1b8f0c2e-4a6d-4b9e-9c3a-7d5e2f8a1b40
+      # MANDATORY SINCE v7 AND UNDOCUMENTED IN THE QUICKSTART. Without it the
+      # platform crash-loops on "app:encryption_key configuration is missing or
+      # invalid" during admin initialisation — infrastructure all healthy, the
+      # platform restarting every 12 seconds. 32 bytes of base64.
+      #
+      # Throwaway, generated for this instance. A real deployment generates its
+      # own and treats losing it as losing the data it protects.
+      - APP__ENCRYPTION_KEY=PfG2K3sRC+HF/FRe4vaU5Q8yU42D1SX7EhLVlS8u2nQ=
+      - APP__APP_LOGS__LOGS_LEVEL=error
+      - REDIS__HOSTNAME=redis
+      - REDIS__PORT=6379
+      - ELASTICSEARCH__URL=http://elasticsearch:9200
+      - MINIO__ENDPOINT=minio
+      - MINIO__PORT=9000
+      - MINIO__USE_SSL=false
+      - MINIO__ACCESS_KEY=opencti
+      - MINIO__SECRET_KEY=verify-only-minio
+      - RABBITMQ__HOSTNAME=rabbitmq
+      - RABBITMQ__PORT=5672
+      - RABBITMQ__PORT_MANAGEMENT=15672
+      - RABBITMQ__MANAGEMENT_SSL=false
+      - RABBITMQ__USERNAME=opencti
+      - RABBITMQ__PASSWORD=verify-only-rabbit
+      - SMTP__HOSTNAME=localhost
+      - PROVIDERS__LOCAL__STRATEGY=LocalStrategy
+    depends_on:
+      elasticsearch: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    healthcheck:
+      # NOT /health. In v7 that endpoint requires either an auth token or an
+      # `app:health_access_key`, so it answers 401 forever and the container
+      # never reports healthy — which silently strands the worker, since it
+      # waits on `service_healthy`. Everything looks up and nothing ingests.
+      # The root path serves the SPA once the platform is genuinely ready.
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/ || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 30
+      start_period: 180s
+
+  worker:
+    image: opencti/worker:7.260817.0
+    restart: unless-stopped
+    environment:
+      - OPENCTI_URL=http://opencti:8080
+      - OPENCTI_TOKEN=1b8f0c2e-4a6d-4b9e-9c3a-7d5e2f8a1b40
+      - WORKER_LOG_LEVEL=error
+    depends_on:
+      opencti: { condition: service_healthy }
+    # ONE worker, not the usual three. Filigran's own clustering guidance caps
+    # this at "3 to 4 maximum per platform" and community experience is that
+    # scaling workers without scaling Elasticsearch makes things worse. One is
+    # plenty for a verification push.
+    deploy:
+      replicas: 1

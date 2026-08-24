@@ -230,3 +230,28 @@ def test_the_route_reports_which_sources_were_present():
     payload = api_app.export_exposure_stix(limit=1)
     assert set(payload["sources_present"]) == {"dns", "takeover"}
     assert payload["objects"] == len(payload["bundle"]["objects"])
+
+
+# ── referential integrity ───────────────────────────────────────────────────
+@pytest.mark.parametrize("org", ["", "acme"])
+def test_every_reference_resolves_inside_the_exposure_bundle(org):
+    """The companion to the same check on `bundle()`, which did NOT hold.
+
+    This path escaped that bug by capturing `emit(infrastructure(...))`'s
+    return value instead of recomputing the id from a second copy of the
+    formula. The check is here so that stays an invariant rather than a
+    happy accident — a live OpenCTI rejects a dangling reference outright
+    with MISSING_REFERENCE_ERROR, and drops the edge silently otherwise.
+    """
+    payload = stix.exposure_bundle([ROW], org=org)
+    present = {o["id"] for o in payload["objects"]}
+    dangling = []
+    for obj in payload["objects"]:
+        if obj["type"] == "relationship":
+            for field in ("source_ref", "target_ref"):
+                if obj[field] not in present:
+                    dangling.append((obj["relationship_type"], field, obj[field]))
+        for ref in obj.get("object_refs") or []:
+            if ref not in present:
+                dangling.append((obj["type"], "object_refs", ref))
+    assert dangling == [], f"references to objects not in the bundle: {dangling}"

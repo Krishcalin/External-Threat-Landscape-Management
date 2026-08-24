@@ -40,11 +40,30 @@ native score would be holding a figure it cannot recompute, age or audit. Under
 an `x_skopos_` prefix it is unmistakably somebody else's opinion, which is what
 it is.
 
-Note that OpenCTI's preservation of arbitrary `x_`-prefixed properties on STIX
-import is **unverified** — it may drop silently. That is acceptable here
-precisely because the score is not load-bearing: the basis is carried three
-more ways (confidence, relationship type, and the description), and those are
-all standard STIX that no consumer can misread.
+**MEASURED against OpenCTI 7.260817.0: every `x_`-prefixed property is
+stripped on import.** Not only ours — its own `x_opencti_*` are absent from the
+round-tripped STIX too, on relationships as well as SDOs. So `x_skopos_teps`
+is transmitted and then discarded, every time, by design of the receiver.
+
+That was the accepted risk and it landed on the bad side. It costs nothing
+because the score was never load-bearing: the basis reaches a consumer three
+more ways — `confidence` (40 worklist / 90 determination), `relationship_type`
+(`related-to` / `has`) and `description` (the caveat prose) — all standard STIX
+that no consumer can misread. It is also why SSVC rides in **labels** rather
+than a property: labels survive, properties do not.
+
+TWO THINGS A LIVE INSTANCE TAUGHT THAT THE DOCUMENTATION DID NOT
+-----------------------------------------------------------------
+**A 404 here almost certainly means the ingester is stopped, not missing.**
+The POST handler answers `Collection not found` when a TAXII Push ingester
+exists but is not running — while the discovery endpoint lists that very
+collection with `can_write: true`. Switch it on under **Data > Ingestion >
+TAXII Push**; the message sends you hunting for the wrong thing.
+
+**The advertised media type is rejected.** The collection names
+`application/stix+json;version=2.1` in its own discovery document, and posting
+that gets a 400. The validator accepts only `application/taxii+json` or
+`application/vnd.oasis.stix+json`, each with `version=2.1`.
 """
 from __future__ import annotations
 
@@ -66,7 +85,15 @@ COLLECTION_ENV = "SKOPOS_OPENCTI_COLLECTION"
 
 #: OpenCTI's TAXII media type. Sending `application/json` gets a 415 and a
 #: confusing afternoon.
+#: VERIFIED against the running platform's own validator, which requires the
+#: type to be in ["application/taxii+json", "application/vnd.oasis.stix+json"]
+#: AND the `version` parameter to equal 2.1. `application/stix+json` — the
+#: media type the collection ADVERTISES in its own discovery document — is
+#: rejected with a 400, which is a trap worth knowing.
 MEDIA_TYPE = "application/taxii+json;version=2.1"
+
+#: OpenCTI hard-codes its TAXII api-root as the literal string `root`.
+API_ROOT = "root"
 
 #: A bundle larger than this is split. OpenCTI's own guidance is that its
 #: ingestion ceiling is Elasticsearch write throughput, with roughly tenfold
@@ -98,7 +125,11 @@ def _endpoint(base: str, collection: str) -> str:
     something else entirely.
     """
     root = str(base or "").rstrip("/")
-    return f"{root}/taxii2/{collection}/objects/"
+    # `/taxii2/root/collections/{id}/objects/` — VERIFIED against a running
+    # OpenCTI 7.260817.0 by reading its own route table, not from the docs.
+    # `root` is the literal TAXII api-root name OpenCTI hard-codes; the earlier
+    # `/taxii2/{id}/objects/` came from a summary and 404s.
+    return f"{root}/taxii2/{API_ROOT}/collections/{collection}/objects/"
 
 
 def split(objects: Sequence[Dict[str, Any]],
