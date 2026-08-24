@@ -748,6 +748,96 @@ def latency_for(cve: str) -> Dict[str, Any]:
 # STIX 2.1 export.
 
 
+def _exposure_rows(limit: int = 500):
+    """The estate, assembled from what is actually PERSISTED.
+
+    Two sources, and the honesty is in what is missing rather than what is
+    here. DNS observations and dangling-record findings are stored, so they
+    describe the whole estate. Certificate posture, abuse-feed membership and
+    leak-site listings are computed per lookup and are NOT persisted per asset,
+    so they are absent from an estate-wide export until something stores them.
+
+    That gap is reported in the payload rather than left for a consumer to
+    infer from a thin bundle.
+    """
+    from collections import defaultdict
+
+    from core import dns_store as _dns
+
+    try:
+        store = _dns.open_dns_store()
+    except Exception:                                           # noqa: BLE001
+        return [], {"dns": False, "takeover": False}
+
+    addresses = defaultdict(set)
+    try:
+        for (name, rrtype), observation in store.latest_observations().items():
+            if str(rrtype).upper() in {"A", "AAAA"}:
+                for value in getattr(observation, "values", ()) or ():
+                    addresses[str(name)].add(str(value))
+    except Exception:                                           # noqa: BLE001
+        pass
+
+    takeovers = {}
+    try:
+        for finding in store.findings(limit=limit):
+            name = str(finding.get("name") or "")
+            if name:
+                takeovers[name] = {
+                    "verdict": str(finding.get("verdict") or ""),
+                    "target": str(finding.get("target") or ""),
+                    "reasons": list(finding.get("reasons") or []),
+                }
+    except Exception:                                           # noqa: BLE001
+        pass
+
+    names = sorted(set(addresses) | set(takeovers))[:limit]
+    rows = []
+    for name in names:
+        row = {"asset": name}
+        if addresses.get(name):
+            row["addresses"] = sorted(addresses[name])
+        if name in takeovers:
+            row["takeover"] = takeovers[name]
+        rows.append(row)
+    return rows, {"dns": bool(addresses), "takeover": bool(takeovers)}
+
+
+@app.get("/api/v1/export/stix/exposure", tags=["export"])
+def export_exposure_stix(limit: int = Query(500, ge=1, le=2000)
+                         ) -> Dict[str, Any]:
+    """The estate as STIX 2.1 — everything that is NOT a CVE finding.
+
+    `/export/stix` carries vulnerability findings, which is one of the nine
+    categories in the rule catalogue. This carries the rest: the asset itself
+    as an `infrastructure` composed of its observables, the addresses it
+    resolves to, and any dangling delegation — each non-CVE observation as a
+    `note` that carries its rule's stated limits, because `core/rules.py`
+    makes that field mandatory.
+
+    This is the half a threat-intelligence platform has no equivalent for.
+    OpenCTI has no asset entity type at all.
+    """
+    from core import stix as _stix
+    from core import tenancy as _tenancy
+
+    rows, sources = _exposure_rows(limit)
+    bundle = _stix.exposure_bundle(rows, org=_tenancy.current_org())
+    return {
+        "bundle": bundle,
+        "assets": len(rows),
+        "objects": len(bundle.get("objects") or []),
+        "sources_present": sources,
+        # Stated rather than left to be inferred from a thin bundle.
+        "not_included": (
+            "Certificate posture, abuse-feed membership and leak-site listings "
+            "are computed per lookup and are not persisted per asset, so they "
+            "are absent from an estate-wide export. They appear on an "
+            "individual /lookup. This is a gap in what SKOPOS stores, not a "
+            "statement that the estate is free of them."),
+    }
+
+
 @app.get("/api/v1/export/stix", tags=["export"])
 def export_stix(limit: int = Query(500, ge=1, le=2000),
                 run: Optional[int] = None) -> Dict[str, Any]:

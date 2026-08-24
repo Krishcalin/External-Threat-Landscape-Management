@@ -77,9 +77,15 @@ def test_coverage_is_available_beside_any_result(corpus):
 # ── staleness: the publisher's date beats the fetch date ────────────────────
 def test_a_fetch_date_is_not_a_data_date(corpus):
     """Feodo Tracker served a list on 2026-08-23 whose own header said
-    2026-03-04. Reporting the fetch alone presents it as same-day."""
-    hit = corpus.check_address("162.243.103.246")[0]
-    assert hit.days_old == 0, "fetched today"
+    2026-03-04. Reporting the fetch alone presents it as same-day.
+
+    TODAY is passed explicitly. The first version of this test omitted it and
+    so read the real clock against a fixture pinned to a fixed date — it passed
+    on the day it was written and failed the next morning. A test whose result
+    depends on when it runs is not testing what it claims to.
+    """
+    hit = corpus.check_address("162.243.103.246", TODAY)[0]
+    assert hit.days_old == 0, "fetched on the fixture's today"
     assert hit.effective_age_days > 150, "but the DATA is months old"
     assert hit.to_dict()["stale"] is True
 

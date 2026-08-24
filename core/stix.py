@@ -222,7 +222,70 @@ def belongs_to(infrastructure_id: str, identity_id: str,
     }
 
 
+def resolves_to(source_id: str, target_id: str,
+                created: Optional[str] = None) -> Dict[str, Any]:
+    """`domain-name --resolves-to--> ipv4-addr`, or name to name.
+
+    A built-in STIX 2.1 relationship and the single most useful edge this
+    product can contribute, because it is the one OpenCTI's own STIX importer
+    is documented as dropping (issue #6928, open two years). A consumer that
+    holds an address from one source and a name from another can join them here.
+
+    It is also how a dangling delegation is expressed honestly: the record
+    points somewhere, and where it points is a fact, separately from any
+    verdict about claimability.
+    """
+    return {
+        "type": "relationship", "spec_version": SPEC_VERSION,
+        "id": _id("relationship", "resolves-to", source_id, target_id),
+        "created": created or _now(), "modified": created or _now(),
+        "relationship_type": "resolves-to",
+        "source_ref": source_id, "target_ref": target_id,
+    }
+
+
+def observation_note(rule_id: str, detail: str, object_refs: Sequence[str],
+                     created: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """One catalogue rule's firing, as a STIX note carrying its own limits.
+
+    THE RULE CATALOGUE IS WHY THIS IS HONEST. `core/rules.py` requires every
+    rule to state what firing does NOT establish, so a note built from one
+    cannot be written without its caveat — the caveat is a required field
+    upstream rather than a courtesy here.
+
+    A note rather than an `indicator` or a `sighting`, deliberately. An
+    indicator is a detection pattern and these are not patterns. A sighting
+    asserts an indicator was seen somewhere, which imports a claim about
+    malice that most of these rules explicitly refuse. A note says: this was
+    observed, here is what it means, here is what it does not.
+    """
+    from core import rules as _rules
+
+    rule = _rules.get(rule_id)
+    if rule is None or not object_refs:
+        # An unknown rule id means the catalogue and the code have drifted.
+        # Emitting a note with no provenance would hide that; returning None
+        # lets the caller count it.
+        return None
+    content = (f"{rule.detects}\n\n"
+               f"OBSERVED: {detail}\n\n"
+               f"THIS DOES NOT MEAN: {rule.limits}\n\n"
+               f"Rule {rule.id} ({rule.severity.value}) from SKOPOS's published "
+               f"catalogue at /api/v1/rules. Emitted by {rule.emitted_by}.")
+    return {
+        "type": "note", "spec_version": SPEC_VERSION,
+        "id": _id("note", rule.id, *sorted(object_refs)),
+        "created": created or _now(), "modified": created or _now(),
+        "abstract": f"{rule.title} ({rule.id})",
+        "content": content,
+        "object_refs": list(object_refs),
+        # Labelled so a consumer can filter on the rule without parsing prose.
+        "labels": [f"skopos-rule:{rule.id}", f"skopos-severity:{rule.severity.value}"],
+    }
+
+
 def vulnerability(cve: str, name: str = "", description: str = "",
+
 
                   created: Optional[str] = None) -> Dict[str, Any]:
     return {
@@ -399,6 +462,162 @@ def _observables_for(finding: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
+def exposure_bundle(assets, created=None, org=""):
+    """Everything SKOPOS knows about an estate that is NOT a CVE finding.
+
+    WHY THIS EXISTS SEPARATELY FROM `bundle`
+    ------------------------------------------
+    `bundle` exports vulnerability findings, which is one of nine categories in
+    `core/rules.py`. The other eight — dangling delegations, abuse-feed
+    membership, leak-site listings, certificate posture, DNS resolution — never
+    reached STIX at all, and they are precisely the half a threat-intelligence
+    platform has no equivalent for. OpenCTI has no asset entity type; this is
+    the content it cannot produce for itself.
+
+    EVERY NON-CVE OBSERVATION BECOMES A NOTE CARRYING ITS RULE'S LIMITS, via
+    `observation_note`. That is not decoration. `core/rules.py` makes the
+    "what this does not mean" field mandatory, so a consumer receives the
+    caveat as a required property of the export rather than as prose somebody
+    remembered to include.
+
+    An asset row is shaped like the console's own view, and every key is
+    optional — a row carrying nothing but a name still produces a `domain-name`
+    observable, which is a fact worth exporting on its own:
+
+        {"asset", "addresses", "certificates", "asn", "takeover",
+         "abuse", "leak_listings", "ownership_verified_on"}
+    """
+    stamp = created or _now()
+    objects = []
+    seen = set()
+    unknown_rules = 0
+
+    def emit(obj):
+        if obj is None:
+            return None
+        if obj["id"] not in seen:
+            objects.append(obj)
+            seen.add(obj["id"])
+        return obj["id"]
+
+    def add_note(rule_id, detail, refs):
+        nonlocal unknown_rules
+        note_obj = observation_note(rule_id, detail,
+                                    [r for r in refs if r], stamp)
+        if note_obj is None:
+            # A rule id the catalogue does not know means the code and
+            # core/rules.py have drifted — the one failure a catalogue has.
+            # Counted rather than silently skipped.
+            unknown_rules += 1
+        else:
+            emit(note_obj)
+
+    for row in assets:
+        name = str(row.get("asset") or "").strip()
+        if not name:
+            continue
+        infra_id = emit(infrastructure(name, "", stamp, org=org))
+
+        address = ip_address(name)
+        primary = emit(address if address is not None else domain_name(name))
+        if primary:
+            objects.append(composed_of(infra_id, primary, stamp))
+
+        for value in row.get("addresses") or []:
+            resolved = emit(ip_address(value))
+            if resolved:
+                objects.append(composed_of(infra_id, resolved, stamp))
+                # The edge OpenCTI's own STIX importer is documented as
+                # dropping (issue #6928, open two years). Emitting it costs
+                # nothing and is a join a consumer cannot make for itself.
+                if primary and address is None:
+                    objects.append(resolves_to(primary, resolved, stamp))
+
+        # The two observable types R1 built and then never called.
+        asn = row.get("asn") or {}
+        if asn.get("number") is not None:
+            system_id = emit(autonomous_system(asn.get("number"),
+                                               str(asn.get("name") or "")))
+            if system_id:
+                objects.append(composed_of(infra_id, system_id, stamp))
+
+        for certificate in row.get("certificates") or []:
+            cert_id = emit(x509_certificate(
+                str(certificate.get("serial") or ""),
+                str(certificate.get("issuer") or ""),
+                str(certificate.get("not_before") or ""),
+                str(certificate.get("not_after") or "")))
+            if not cert_id:
+                continue
+            objects.append(composed_of(infra_id, cert_id, stamp))
+            issuer = certificate.get("issuer") or "an unnamed CA"
+            expires = certificate.get("not_after") or "an unknown date"
+            for rule_id in certificate.get("rules") or []:
+                add_note(rule_id,
+                         "{0}: certificate issued by {1}, valid until "
+                         "{2}".format(name, issuer, expires),
+                         [cert_id, infra_id])
+
+        verified = str(row.get("ownership_verified_on") or "")
+        if org and verified:
+            identity_id = emit(organization(org, stamp))
+            objects.append(belongs_to(infra_id, identity_id, verified, stamp))
+
+        takeover = row.get("takeover") or {}
+        verdict = str(takeover.get("verdict") or "")
+        if verdict:
+            target = str(takeover.get("target") or "")
+            target_id = emit(domain_name(target)) if target else None
+            if primary and target_id:
+                # WHERE IT POINTS is a fact, emitted separately from any
+                # verdict about whether anybody could claim it. The verdict
+                # lives in the note, with its permanent ceiling attached.
+                objects.append(resolves_to(primary, target_id, stamp))
+            reasons = "; ".join(str(r) for r in (takeover.get("reasons") or []))
+            add_note("takeover." + verdict,
+                     "{0} delegates to {1}. {2}".format(
+                         name, target or "an unresolved target", reasons[:400]),
+                     [infra_id, target_id])
+
+        for hit in row.get("abuse") or []:
+            rule_id = ("abuse.tor_exit" if str(hit.get("sense")) == "NEUTRAL"
+                       else "abuse.listed")
+            add_note(rule_id,
+                     "{0} appears on {1} ({2}), data {3} day(s) old.".format(
+                         name, hit.get("feed"), hit.get("publisher"),
+                         hit.get("data_age_days")),
+                     [primary or infra_id])
+
+        for listing in row.get("leak_listings") or []:
+            rule_id = ("leak.domain_listed"
+                       if str(listing.get("confidence")) == "domain"
+                       else "leak.name_listed")
+            add_note(rule_id,
+                     "{0} published this name on its public victim index on "
+                     "{1} (match confidence: {2}).".format(
+                         listing.get("group"), listing.get("published"),
+                         listing.get("confidence")),
+                     [infra_id])
+
+    if objects:
+        # The producer's refusals and accuracy record travel with an exposure
+        # bundle exactly as they do with a findings bundle. A consumer given
+        # assets with no statement of what this product declines would read the
+        # absences as oversights.
+        objects.append(note(_provenance_note(),
+                            [o["id"] for o in objects
+                             if o["type"] == "infrastructure"][:200], stamp))
+
+    payload = {
+        "type": "bundle",
+        "id": _id("bundle", "exposure", stamp, org or "default"),
+        "objects": objects,
+    }
+    if unknown_rules:
+        payload["x_skopos_unknown_rules"] = unknown_rules
+    return payload
+
+
 def bundle(findings: Iterable[Dict[str, Any]],
            created: Optional[str] = None,
            org: str = "") -> Dict[str, Any]:
@@ -474,6 +693,10 @@ def to_json(findings: Iterable[Dict[str, Any]], indent: int = 1) -> str:
     return json.dumps(bundle(findings), indent=indent, ensure_ascii=False)
 
 
-__all__ = ["SPEC_VERSION", "NAMESPACE", "BUNDLE_CAVEAT", "bundle", "to_json",
+__all__ = ["SPEC_VERSION", "NAMESPACE", "SCO_NAMESPACE", "BUNDLE_CAVEAT",
+           "bundle", "exposure_bundle", "to_json",
+           "domain_name", "ip_address", "software", "autonomous_system",
+           "x509_certificate", "organization", "composed_of", "belongs_to",
+           "resolves_to", "observation_note",
            "vulnerability", "infrastructure", "relationship", "note",
            "CONFIDENCE_DETERMINATION", "CONFIDENCE_WORKLIST"]
